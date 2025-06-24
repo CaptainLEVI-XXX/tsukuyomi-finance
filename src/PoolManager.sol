@@ -8,13 +8,8 @@ import {ERC6909} from "@solmate/tokens/ERC6909.sol";
 import {IERC20} from './interfaces/IERC20.sol';
 import {CustomRevert} from './libraries/CustomRevert.sol';
 
-interface IPriceOracle {
-    function getPrice(address asset) external view returns (uint256 price, uint8 decimals);
-    function getPriceInUSD(address asset) external view returns (uint256 priceInUSD);
-}
-
 /**
- * @title Enhanced Pool Manager
+ * @title  Pool Manager
  * @notice A comprehensive pool manager that handles multi-asset deposits with oracle pricing and strategy allocations
  * @dev Consolidates vault functionality with proper fund tracking and oracle integration
  */
@@ -27,25 +22,8 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     address public strategyManager;
     uint256 public totalValueLocked; // Total USD value in the pool
     uint256 private _tokenIdCounter;
-    
-    struct AssetInfo {
-        address asset;
-        string name;
-        string symbol;
-        uint8 decimals;
-        bool isActive;
-        uint256 totalDeposited;        // Total amount deposited by users
-        uint256 allocatedToStrategy;   // Amount currently allocated to strategies
-        uint256 pendingYield;          // Yield pending distribution
-        uint256 totalShares;           // Total shares for this asset
-        uint256 lastYieldUpdate;       // Last time yield was updated
-    }
-    
-    struct UserPosition {
-        uint256 sharesOwned;
-        uint256 lastDepositTime;
-        uint256 accumulatedYield;
-    }
+
+  
     
     // Mappings
     mapping(uint256 tokenId => AssetInfo) public assets;
@@ -59,18 +37,8 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     
     uint256 public constant PRECISION = 1e18;
     uint256 public constant MAX_ALLOCATION_PERCENTAGE = 8000; // 80% max allocation to strategies
+    uint256 public constant MINIMUM_SHARES = 1000; // Minimum shares to prevent rounding issues
     
-    // ============ Events ============
-    
-    event AssetAdded(uint256 indexed tokenId, address indexed asset, string name, string symbol);
-    event AssetRemoved(uint256 indexed tokenId, address indexed asset);
-    event Deposit(uint256 indexed tokenId, address indexed user, uint256 assets, uint256 shares, uint256 usdValue);
-    event Withdrawal(uint256 indexed tokenId, address indexed user, uint256 assets, uint256 shares, uint256 usdValue);
-    event FundsAllocatedToStrategy(uint256 indexed tokenId, uint256 amount, uint256 usdValue);
-    event FundsReturnedFromStrategy(uint256 indexed tokenId, uint256 principal, uint256 yield, uint256 totalReturned);
-    event YieldDistributed(uint256 indexed tokenId, uint256 totalYield, uint256 timestamp);
-    event OracleUpdated(address oldOracle, address newOracle);
-    event StrategyManagerUpdated(address oldManager, address newManager);
     
     // ============ Errors ============
     
@@ -84,6 +52,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     error UnauthorizedCaller();
     error OracleError();
     error ZeroAddress();
+    error MinimumSharesRequired();
     
     // ============ Modifiers ============
     
@@ -140,11 +109,11 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
             symbol: symbol,
             decimals: decimals,
             isActive: true,
-            totalDeposited: 0,
+            totalAssets: 0,
             allocatedToStrategy: 0,
-            pendingYield: 0,
             totalShares: 0,
-            lastYieldUpdate: block.timestamp
+            lastUpdateTime: block.timestamp,
+            totalYieldEarned: 0
         });
         
         assetToTokenId[asset] = tokenId;
@@ -162,7 +131,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         if (assetInfo.allocatedToStrategy > 0) revert InvalidAllocation();
         
         // Ensure no deposits remain
-        if (assetInfo.totalDeposited > 0) revert InsufficientBalance();
+        if (assetInfo.totalAssets > 0) revert InsufficientBalance();
         
         address asset = assetInfo.asset;
         assetInfo.isActive = false;
@@ -190,26 +159,29 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         AssetInfo storage assetInfo = assets[tokenId];
         
         // Calculate shares to mint
-        shares = _calculateShares(tokenId, amount);
+        shares = _convertToShares(tokenId, amount);
+        
+        // Ensure minimum shares to prevent rounding issues
+        if (shares < MINIMUM_SHARES && assetInfo.totalShares > 0) revert MinimumSharesRequired();
         
         // Get USD value for tracking
         uint256 usdValue = _getUSDValue(assetInfo.asset, amount);
         
+        // Transfer tokens first (checks-effects-interactions)
+        IERC20(assetInfo.asset).transferFrom(msg.sender, address(this), amount);
+        
         // Update state
-        assetInfo.totalDeposited += amount;
+        assetInfo.totalAssets += amount;
         assetInfo.totalShares += shares;
         totalValueLocked += usdValue;
+        assetInfo.lastUpdateTime = block.timestamp;
         
         // Update user position
         UserPosition storage position = userPositions[tokenId][receiver];
-        position.sharesOwned += shares;
-        position.lastDepositTime = block.timestamp;
+        position.lastInteractionTime = block.timestamp;
         
         // Mint shares (ERC6909)
         _mint(receiver, tokenId, shares);
-        
-        // Transfer tokens
-        IERC20(assetInfo.asset).transferFrom(msg.sender, address(this), amount);
         
         emit Deposit(tokenId, receiver, amount, shares, usdValue);
         return shares;
@@ -225,27 +197,34 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         // Check user has enough shares
         if (balanceOf[msg.sender][tokenId] < shares) revert InsufficientBalance();
         
-        // Calculate assets to return
-        assets = _calculateAssets(tokenId, shares);
+        // Calculate assets to return (includes proportional yield)
+        assets = _convertToAssets(tokenId, shares);
         
         // Check liquidity (available assets not allocated to strategies)
-        uint256 availableAssets = assetInfo.totalDeposited - assetInfo.allocatedToStrategy;
+        uint256 availableAssets = assetInfo.totalAssets - assetInfo.allocatedToStrategy;
         if (assets > availableAssets) revert InsufficientLiquidity();
         
         // Get USD value for tracking
         uint256 usdValue = _getUSDValue(assetInfo.asset, assets);
         
+        // Burn shares first
+        _burn(msg.sender, tokenId, shares);
+        
         // Update state
-        assetInfo.totalDeposited -= assets;
+        assetInfo.totalAssets -= assets;
         assetInfo.totalShares -= shares;
         totalValueLocked -= usdValue;
+        assetInfo.lastUpdateTime = block.timestamp;
         
         // Update user position
         UserPosition storage position = userPositions[tokenId][msg.sender];
-        position.sharesOwned -= shares;
+        position.lastInteractionTime = block.timestamp;
         
-        // Burn shares
-        _burn(msg.sender, tokenId, shares);
+        // Track yield withdrawn for analytics
+        uint256 principalPortion = (shares * assetInfo.totalAssets) / assetInfo.totalShares;
+        if (assets > principalPortion) {
+            position.cumulativeYieldWithdrawn += (assets - principalPortion);
+        }
         
         // Transfer assets
         IERC20(assetInfo.asset).transfer(receiver, assets);
@@ -263,12 +242,12 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         AssetInfo storage assetInfo = assets[tokenId];
         
         // Check available liquidity
-        uint256 availableAssets = assetInfo.totalDeposited - assetInfo.allocatedToStrategy;
+        uint256 availableAssets = assetInfo.totalAssets - assetInfo.allocatedToStrategy;
         if (amount > availableAssets) revert InsufficientLiquidity();
         
         // Check allocation limits (max 80% can be allocated)
         uint256 newAllocation = assetInfo.allocatedToStrategy + amount;
-        uint256 maxAllocation = (assetInfo.totalDeposited * MAX_ALLOCATION_PERCENTAGE) / 10000;
+        uint256 maxAllocation = (assetInfo.totalAssets * MAX_ALLOCATION_PERCENTAGE) / 10000;
         if (newAllocation > maxAllocation) revert InvalidAllocation();
         
         // Update allocation
@@ -292,44 +271,34 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         
         uint256 totalReturned = principal + yield;
         
-        // Ensure we don't return more than allocated
+        // Ensure we don't return more principal than allocated
         if (principal > assetInfo.allocatedToStrategy) {
             principal = assetInfo.allocatedToStrategy;
         }
         
-        // Update allocations
-        assetInfo.allocatedToStrategy -= principal;
-        assetInfo.totalDeposited += yield; // Add yield to total pool
-        assetInfo.pendingYield += yield;
-        assetInfo.lastYieldUpdate = block.timestamp;
-        
-        // Update total value locked with yield
-        uint256 yieldUSDValue = _getUSDValue(assetInfo.asset, yield);
-        totalValueLocked += yieldUSDValue;
-        
-        // Receive tokens back
+        // Receive tokens back first
         IERC20(assetInfo.asset).transferFrom(strategyManager, address(this), totalReturned);
         
-        emit FundsReturnedFromStrategy(tokenId, principal, yield, totalReturned);
+        // Update allocations
+        assetInfo.allocatedToStrategy -= principal;
         
-        // Distribute yield if significant amount
+        // Add yield to total assets (this increases share value)
         if (yield > 0) {
-            _distributeYield(tokenId);
-        }
-    }
-    
-    // ============ Yield Distribution ============
-    
-    function _distributeYield(uint256 tokenId) internal {
-        AssetInfo storage assetInfo = assets[tokenId];
-        
-        if (assetInfo.pendingYield > 0 && assetInfo.totalShares > 0) {
-            // Yield is automatically distributed proportionally when users withdraw
-            // due to the share calculation including the increased total deposited
+            assetInfo.totalAssets += yield;
+            assetInfo.totalYieldEarned += yield;
             
-            emit YieldDistributed(tokenId, assetInfo.pendingYield, block.timestamp);
-            assetInfo.pendingYield = 0;
+            // Update total value locked with yield
+            uint256 yieldUSDValue = _getUSDValue(assetInfo.asset, yield);
+            totalValueLocked += yieldUSDValue;
+            
+            // Calculate and emit new share value
+            uint256 newShareValue = getShareValue(tokenId);
+            emit YieldAccrued(tokenId, yield, newShareValue);
         }
+        
+        assetInfo.lastUpdateTime = block.timestamp;
+        
+        emit FundsReturnedFromStrategy(tokenId, principal, yield, totalReturned);
     }
     
     // ============ View Functions ============
@@ -344,7 +313,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     
     function getAvailableLiquidity(uint256 tokenId) external view validTokenId(tokenId) returns (uint256) {
         AssetInfo storage assetInfo = assets[tokenId];
-        return assetInfo.totalDeposited - assetInfo.allocatedToStrategy;
+        return assetInfo.totalAssets - assetInfo.allocatedToStrategy;
     }
     
     function getTotalUSDValue() external view returns (uint256) {
@@ -356,35 +325,79 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     }
     
     function previewDeposit(uint256 tokenId, uint256 assets) external view validTokenId(tokenId) returns (uint256 shares) {
-        return _calculateShares(tokenId, assets);
+        return _convertToShares(tokenId, assets);
     }
     
     function previewWithdraw(uint256 tokenId, uint256 shares) external view validTokenId(tokenId) returns (uint256 assets) {
-        return _calculateAssets(tokenId, shares);
+        return _convertToAssets(tokenId, shares);
+    }
+    
+    /**
+     * @notice Get the current value of one share in asset terms
+     * @param tokenId The token ID to check
+     * @return The value of one share (with decimals matching the asset)
+     */
+    function getShareValue(uint256 tokenId) public view validTokenId(tokenId) returns (uint256) {
+        AssetInfo storage assetInfo = assets[tokenId];
+        if (assetInfo.totalShares == 0) {
+            return 10 ** assetInfo.decimals; // 1:1 when no shares exist
+        }
+        return (assetInfo.totalAssets * (10 ** assetInfo.decimals)) / assetInfo.totalShares;
+    }
+    
+    /**
+     * @notice Get user's asset value including unrealized yield
+     * @param tokenId The token ID
+     * @param user The user address
+     * @return Current value of user's position in asset terms
+     */
+    function getUserAssetValue(uint256 tokenId, address user) external view validTokenId(tokenId) returns (uint256) {
+        uint256 userShares = balanceOf[user][tokenId];
+        if (userShares == 0) return 0;
+        return _convertToAssets(tokenId, userShares);
     }
     
     // ============ Internal Functions ============
     
-    function _calculateShares(uint256 tokenId, uint256 assets) internal view returns (uint256) {
+    /**
+     * @dev Convert asset amount to shares
+     * @param tokenId The token ID
+     * @param assets The amount of assets to convert
+     * @return shares The equivalent amount of shares
+     */
+    function _convertToShares(uint256 tokenId, uint256 assets) internal view returns (uint256 shares) {
         AssetInfo storage assetInfo = assets[tokenId];
         
-        if (assetInfo.totalShares == 0) {
-            return assets;
+        if (assetInfo.totalShares == 0 || assetInfo.totalAssets == 0) {
+            // First deposit - 1:1 ratio but with minimum shares consideration
+            shares = assets;
+            if (shares < MINIMUM_SHARES) shares = MINIMUM_SHARES;
+        } else {
+            // shares = (assets * totalShares) / totalAssets
+            shares = (assets * assetInfo.totalShares) / assetInfo.totalAssets;
         }
         
-        // shares = (assets * totalShares) / totalDeposited
-        return (assets * assetInfo.totalShares) / assetInfo.totalDeposited;
+        return shares;
     }
     
-    function _calculateAssets(uint256 tokenId, uint256 shares) internal view returns (uint256) {
+    /**
+     * @dev Convert shares to asset amount
+     * @param tokenId The token ID
+     * @param shares The amount of shares to convert
+     * @return assets The equivalent amount of assets
+     */
+    function _convertToAssets(uint256 tokenId, uint256 shares) internal view returns (uint256 assets) {
         AssetInfo storage assetInfo = assets[tokenId];
         
         if (assetInfo.totalShares == 0) {
-            return shares;
+            return 0;
         }
         
-        // assets = (shares * totalDeposited) / totalShares
-        return (shares * assetInfo.totalDeposited) / assetInfo.totalShares;
+        // assets = (shares * totalAssets) / totalShares
+        // This automatically includes any yield earned
+        assets = (shares * assetInfo.totalAssets) / assetInfo.totalShares;
+        
+        return assets;
     }
     
     function _getUSDValue(address asset, uint256 amount) internal view returns (uint256) {
@@ -417,8 +430,19 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     
     // ============ Emergency Functions ============
     
+    bool public paused;
+    
+    modifier whenNotPaused() {
+        require(!paused, "Paused");
+        _;
+    }
+    
     function emergencyPause() external onlyOwner {
-        // Implementation for emergency pause
+        paused = true;
+    }
+    
+    function unpause() external onlyOwner {
+        paused = false;
     }
     
     function recoverERC20(address token, uint256 amount) external onlyOwner {
@@ -431,16 +455,25 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
     
+    // Override deposit and withdraw to add pause functionality
+    function _mint(address to, uint256 id, uint256 amount) internal override whenNotPaused {
+        super._mint(to, id, amount);
+    }
+    
+    function _burn(address from, uint256 id, uint256 amount) internal override whenNotPaused {
+        super._burn(from, id, amount);
+    }
+    
     // ERC6909 metadata functions
-    function name(uint256 tokenId) public view returns (string memory) {
+    function name(uint256 tokenId) public view override returns (string memory) {
         return assets[tokenId].name;
     }
     
-    function symbol(uint256 tokenId) public view returns (string memory) {
+    function symbol(uint256 tokenId) public view override returns (string memory) {
         return assets[tokenId].symbol;
     }
     
-    function decimals(uint256 tokenId) public view returns (uint8) {
+    function decimals(uint256 tokenId) public view override returns (uint8) {
         return assets[tokenId].decimals;
     }
 }

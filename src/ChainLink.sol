@@ -2,26 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Ownable} from "@solady/auth/Ownable.sol";
-
-interface AggregatorV3Interface {
-    function decimals() external view returns (uint8);
-    function description() external view returns (string memory);
-    function version() external view returns (uint256);
-    function getRoundData(uint80 _roundId) external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    );
-    function latestRoundData() external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    );
-}
+import{IAggregatorV3Interface} from "./interfaces/IAggregatorV3Interface.sol";
 
 /**
  * @title Chainlink Price Oracle
@@ -30,7 +11,7 @@ interface AggregatorV3Interface {
 contract ChainlinkPriceOracle is Ownable {
     
     struct PriceFeed {
-        AggregatorV3Interface feed;
+        IAggregatorV3Interface feed;
         uint256 heartbeat; // Maximum acceptable time between updates (seconds)
         bool isActive;
     }
