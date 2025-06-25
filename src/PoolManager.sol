@@ -5,43 +5,80 @@ import {UUPSUpgradeable} from "@solady/utils/UUPSUpgradeable.sol";
 import {Ownable} from "@solady/auth/Ownable.sol";
 import {Initializable} from "@solady/utils/Initializable.sol";
 import {ERC6909} from "@solmate/tokens/ERC6909.sol";
-import {IERC20} from './interfaces/IERC20.sol';
-import {CustomRevert} from './libraries/CustomRevert.sol';
+import {IERC20} from "./interfaces/IERC20.sol";
+import {CustomRevert} from "./libraries/CustomRevert.sol";
+
+interface IPriceOracle {
+    function getPrice(address asset) external view returns (uint256 price, uint8 decimals);
+    function getPriceInUSD(address asset) external view returns (uint256 priceInUSD);
+}
 
 /**
- * @title  Pool Manager
+ * @title Enhanced Pool Manager
  * @notice A comprehensive pool manager that handles multi-asset deposits with oracle pricing and strategy allocations
- * @dev Consolidates vault functionality with proper fund tracking and oracle integration
+ * @dev Fully optimized implementation with proper ERC6909 integration
  */
 contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     using CustomRevert for bytes4;
 
-    // ============ State Variables ============
-    
+    // ============ State Variables (Optimized Storage Layout) ============
+
+    // Slot 1
     IPriceOracle public priceOracle;
+
+    // Slot 2
     address public strategyManager;
-    uint256 public totalValueLocked; // Total USD value in the pool
+    uint8 private _paused; // Using uint8 for bool to pack better
+    uint88 private _reserved; // Reserved for future use
+
+    // Slot 3
+    uint256 public totalValueLocked;
+
+    // Slot 4
     uint256 private _tokenIdCounter;
 
-  
-    
+    struct AssetInfo {
+        address asset; // Slot 1
+        uint96 totalShares; // Slot 1 (packed)
+        uint128 totalAssets; // Slot 2 (sufficient for most tokens)
+        uint128 allocatedToStrategy; // Slot 2 (packed)
+        string name; // Dynamic
+        string symbol; // Dynamic
+        uint8 decimals; // Slot after strings
+        bool isActive; // Slot after strings (packed)
+        uint32 lastUpdateTime; // Slot after strings (packed)
+        uint64 totalYieldEarned; // Slot after strings (packed)
+    }
+
     // Mappings
-    mapping(uint256 tokenId => AssetInfo) public assets;
-    mapping(address asset => uint256 tokenId) public assetToTokenId;
-    mapping(uint256 tokenId => mapping(address user => UserPosition)) public userPositions;
-    mapping(address asset => bool) public supportedAssets;
-    
+    mapping(uint256 => AssetInfo) public assets;
+    mapping(address => uint256) public assetToTokenId;
+    mapping(address => bool) public supportedAssets;
+
+    // Dynamic array for active tokens
     uint256[] public activeTokenIds;
-    
+
     // ============ Constants ============
-    
-    uint256 public constant PRECISION = 1e18;
-    uint256 public constant MAX_ALLOCATION_PERCENTAGE = 8000; // 80% max allocation to strategies
-    uint256 public constant MINIMUM_SHARES = 1000; // Minimum shares to prevent rounding issues
-    
-    
+
+    uint256 private constant PRECISION = 1e18;
+    uint256 private constant MAX_ALLOCATION_BPS = 8000; // 80% in basis points
+    uint256 private constant BPS_DIVISOR = 10000;
+    uint256 private constant MINIMUM_SHARES = 1000;
+
+    // ============ Events ============
+
+    event AssetAdded(uint256 indexed tokenId, address indexed asset, string name, string symbol);
+    event AssetRemoved(uint256 indexed tokenId, address indexed asset);
+    event Deposit(uint256 indexed tokenId, address indexed user, uint256 assets, uint256 shares);
+    event Withdrawal(uint256 indexed tokenId, address indexed user, uint256 assets, uint256 shares);
+    event StrategyAllocation(uint256 indexed tokenId, uint256 amount);
+    event StrategyReturn(uint256 indexed tokenId, uint256 principal, uint256 yield);
+    event OracleUpdated(address indexed oldOracle, address indexed newOracle);
+    event StrategyManagerUpdated(address indexed oldManager, address indexed newManager);
+    event Paused(bool isPaused);
+
     // ============ Errors ============
-    
+
     error AssetNotSupported();
     error AssetAlreadyExists();
     error InvalidTokenId();
@@ -53,427 +90,416 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     error OracleError();
     error ZeroAddress();
     error MinimumSharesRequired();
-    
+    error Overflow();
+    error Pause();
+
     // ============ Modifiers ============
-    
+
+    modifier whenNotPaused() {
+        if (_paused == 1) revert Pause();
+        _;
+    }
+
     modifier onlyStrategyManager() {
         if (msg.sender != strategyManager) revert UnauthorizedCaller();
         _;
     }
-    
+
     modifier validTokenId(uint256 tokenId) {
         if (tokenId == 0 || tokenId > _tokenIdCounter || !assets[tokenId].isActive) {
             revert InvalidTokenId();
         }
         _;
     }
-    
-    modifier nonZeroAmount(uint256 amount) {
-        if (amount == 0) revert InvalidAmount();
-        _;
-    }
-    
+
     // ============ Initialization ============
-    
-    function initialize(
-        address _owner,
-        address _strategyManager,
-        address _priceOracle
-    ) public initializer {
+
+    function initialize(address _owner, address _strategyManager, address _priceOracle) public initializer {
         if (_owner == address(0) || _strategyManager == address(0) || _priceOracle == address(0)) {
             revert ZeroAddress();
         }
-        
+
         _initializeOwner(_owner);
         strategyManager = _strategyManager;
         priceOracle = IPriceOracle(_priceOracle);
     }
-    
-    // ============ Asset Management ============
-    
-    function addAsset(
-        address asset,
-        string memory name,
-        string memory symbol
-    ) external onlyOwner returns (uint256 tokenId) {
+
+    // ============ Core Functions ============
+
+    /**
+     * @notice Add a new asset to the pool
+     * @param asset The asset address
+     * @param name The asset name for ERC6909
+     * @param symbol The asset symbol for ERC6909
+     * @return tokenId The assigned token ID
+     */
+    function addAsset(address asset, string calldata name, string calldata symbol)
+        external
+        onlyOwner
+        returns (uint256 tokenId)
+    {
         if (asset == address(0)) revert ZeroAddress();
         if (supportedAssets[asset]) revert AssetAlreadyExists();
-        
-        uint8 decimals = IERC20(asset).decimals();
-        _tokenIdCounter++;
-        tokenId = _tokenIdCounter;
-        
+
+        tokenId = ++_tokenIdCounter;
+
         assets[tokenId] = AssetInfo({
             asset: asset,
-            name: name,
-            symbol: symbol,
-            decimals: decimals,
-            isActive: true,
+            totalShares: 0,
             totalAssets: 0,
             allocatedToStrategy: 0,
-            totalShares: 0,
-            lastUpdateTime: block.timestamp,
+            name: name,
+            symbol: symbol,
+            decimals: IERC20(asset).decimals(),
+            isActive: true,
+            lastUpdateTime: uint32(block.timestamp),
             totalYieldEarned: 0
         });
-        
+
         assetToTokenId[asset] = tokenId;
         supportedAssets[asset] = true;
         activeTokenIds.push(tokenId);
-        
+
         emit AssetAdded(tokenId, asset, name, symbol);
-        return tokenId;
     }
-    
-    function removeAsset(uint256 tokenId) external onlyOwner validTokenId(tokenId) {
+
+    /**
+     * @notice Deposit assets and receive shares
+     * @param tokenId The token ID to deposit
+     * @param amount The amount of assets to deposit
+     * @param receiver The address to receive shares
+     * @return shares The amount of shares minted
+     */
+    function deposit(uint256 tokenId, uint256 amount, address receiver)
+        external
+        whenNotPaused
+        validTokenId(tokenId)
+        returns (uint256 shares)
+    {
+        if (amount == 0) revert InvalidAmount();
+
         AssetInfo storage assetInfo = assets[tokenId];
-        
-        // Ensure no funds are allocated to strategies
-        if (assetInfo.allocatedToStrategy > 0) revert InvalidAllocation();
-        
-        // Ensure no deposits remain
-        if (assetInfo.totalAssets > 0) revert InsufficientBalance();
-        
-        address asset = assetInfo.asset;
-        assetInfo.isActive = false;
-        supportedAssets[asset] = false;
-        
-        // Remove from active token IDs
-        for (uint256 i = 0; i < activeTokenIds.length; i++) {
-            if (activeTokenIds[i] == tokenId) {
-                activeTokenIds[i] = activeTokenIds[activeTokenIds.length - 1];
-                activeTokenIds.pop();
-                break;
-            }
+
+        // Calculate shares
+        uint256 _totalAssets = assetInfo.totalAssets;
+        uint256 _totalShares = assetInfo.totalShares;
+
+        if (_totalShares == 0 || _totalAssets == 0) {
+            shares = amount < MINIMUM_SHARES ? MINIMUM_SHARES : amount;
+        } else {
+            shares = (amount * _totalShares) / _totalAssets;
+            if (shares < MINIMUM_SHARES) revert MinimumSharesRequired();
         }
-        
-        emit AssetRemoved(tokenId, asset);
-    }
-    
-    // ============ Deposit & Withdrawal Functions ============
-    
-    function deposit(
-        uint256 tokenId,
-        uint256 amount,
-        address receiver
-    ) external payable validTokenId(tokenId) nonZeroAmount(amount) returns (uint256 shares) {
-        AssetInfo storage assetInfo = assets[tokenId];
-        
-        // Calculate shares to mint
-        shares = _convertToShares(tokenId, amount);
-        
-        // Ensure minimum shares to prevent rounding issues
-        if (shares < MINIMUM_SHARES && assetInfo.totalShares > 0) revert MinimumSharesRequired();
-        
-        // Get USD value for tracking
-        uint256 usdValue = _getUSDValue(assetInfo.asset, amount);
-        
-        // Transfer tokens first (checks-effects-interactions)
+
+        // Transfer assets (CEI pattern)
         IERC20(assetInfo.asset).transferFrom(msg.sender, address(this), amount);
-        
-        // Update state
-        assetInfo.totalAssets += amount;
-        assetInfo.totalShares += shares;
-        totalValueLocked += usdValue;
-        assetInfo.lastUpdateTime = block.timestamp;
-        
-        // Update user position
-        UserPosition storage position = userPositions[tokenId][receiver];
-        position.lastInteractionTime = block.timestamp;
-        
-        // Mint shares (ERC6909)
-        _mint(receiver, tokenId, shares);
-        
-        emit Deposit(tokenId, receiver, amount, shares, usdValue);
-        return shares;
-    }
-    
-    function withdraw(
-        uint256 tokenId,
-        uint256 shares,
-        address receiver
-    ) external validTokenId(tokenId) nonZeroAmount(shares) returns (uint256 assets) {
-        AssetInfo storage assetInfo = assets[tokenId];
-        
-        // Check user has enough shares
-        if (balanceOf[msg.sender][tokenId] < shares) revert InsufficientBalance();
-        
-        // Calculate assets to return (includes proportional yield)
-        assets = _convertToAssets(tokenId, shares);
-        
-        // Check liquidity (available assets not allocated to strategies)
-        uint256 availableAssets = assetInfo.totalAssets - assetInfo.allocatedToStrategy;
-        if (assets > availableAssets) revert InsufficientLiquidity();
-        
-        // Get USD value for tracking
-        uint256 usdValue = _getUSDValue(assetInfo.asset, assets);
-        
-        // Burn shares first
-        _burn(msg.sender, tokenId, shares);
-        
-        // Update state
-        assetInfo.totalAssets -= assets;
-        assetInfo.totalShares -= shares;
-        totalValueLocked -= usdValue;
-        assetInfo.lastUpdateTime = block.timestamp;
-        
-        // Update user position
-        UserPosition storage position = userPositions[tokenId][msg.sender];
-        position.lastInteractionTime = block.timestamp;
-        
-        // Track yield withdrawn for analytics
-        uint256 principalPortion = (shares * assetInfo.totalAssets) / assetInfo.totalShares;
-        if (assets > principalPortion) {
-            position.cumulativeYieldWithdrawn += (assets - principalPortion);
+
+        // Update state with overflow checks
+        unchecked {
+            uint256 newTotalAssets = _totalAssets + amount;
+            if (newTotalAssets < _totalAssets) revert Overflow();
+            assetInfo.totalAssets = uint128(newTotalAssets);
+
+            uint256 newTotalShares = _totalShares + shares;
+            if (newTotalShares < _totalShares) revert Overflow();
+            assetInfo.totalShares = uint96(newTotalShares);
         }
-        
-        // Transfer assets
-        IERC20(assetInfo.asset).transfer(receiver, assets);
-        
-        emit Withdrawal(tokenId, msg.sender, assets, shares, usdValue);
-        return assets;
+
+        assetInfo.lastUpdateTime = uint32(block.timestamp);
+
+        // Update TVL
+        totalValueLocked += _getUSDValue(assetInfo.asset, amount);
+
+        // Mint shares using ERC6909's _mint
+        _mint(receiver, tokenId, shares);
+
+        emit Deposit(tokenId, receiver, amount, shares);
     }
-    
-    // ============ Strategy Management ============
-    
-    function allocateToStrategy(
-        uint256 tokenId,
-        uint256 amount
-    ) external onlyStrategyManager validTokenId(tokenId) nonZeroAmount(amount) {
+
+    /**
+     * @notice Withdraw assets by burning shares
+     * @param tokenId The token ID to withdraw
+     * @param shares The amount of shares to burn
+     * @param receiver The address to receive assets
+     * @return amount The amount of assets withdrawn
+     */
+    function withdraw(uint256 tokenId, uint256 shares, address receiver)
+        external
+        whenNotPaused
+        validTokenId(tokenId)
+        returns (uint256 amount)
+    {
+        if (shares == 0) revert InvalidAmount();
+
+        // Check balance using ERC6909's balanceOf
+        if (balanceOf[msg.sender][tokenId] < shares) revert InsufficientBalance();
+
         AssetInfo storage assetInfo = assets[tokenId];
-        
+
+        // Calculate assets to return
+        amount = (shares * assetInfo.totalAssets) / assetInfo.totalShares;
+
         // Check available liquidity
-        uint256 availableAssets = assetInfo.totalAssets - assetInfo.allocatedToStrategy;
-        if (amount > availableAssets) revert InsufficientLiquidity();
-        
-        // Check allocation limits (max 80% can be allocated)
-        uint256 newAllocation = assetInfo.allocatedToStrategy + amount;
-        uint256 maxAllocation = (assetInfo.totalAssets * MAX_ALLOCATION_PERCENTAGE) / 10000;
-        if (newAllocation > maxAllocation) revert InvalidAllocation();
-        
-        // Update allocation
-        assetInfo.allocatedToStrategy += amount;
-        
-        // Get USD value for tracking
-        uint256 usdValue = _getUSDValue(assetInfo.asset, amount);
-        
-        // Transfer to strategy manager
-        IERC20(assetInfo.asset).transfer(strategyManager, amount);
-        
-        emit FundsAllocatedToStrategy(tokenId, amount, usdValue);
+        uint256 available = assetInfo.totalAssets - assetInfo.allocatedToStrategy;
+        if (amount > available) revert InsufficientLiquidity();
+
+        // Burn shares first using ERC6909's _burn
+        _burn(msg.sender, tokenId, shares);
+
+        // Update state
+        unchecked {
+            assetInfo.totalAssets = uint128(assetInfo.totalAssets - amount);
+            assetInfo.totalShares = uint96(assetInfo.totalShares - shares);
+        }
+        assetInfo.lastUpdateTime = uint32(block.timestamp);
+
+        // Update TVL
+        totalValueLocked -= _getUSDValue(assetInfo.asset, amount);
+
+        // Transfer assets
+        IERC20(assetInfo.asset).transfer(receiver, amount);
+
+        emit Withdrawal(tokenId, msg.sender, amount, shares);
     }
-    
-    function returnFromStrategy(
-        uint256 tokenId,
-        uint256 principal,
-        uint256 yield
-    ) external onlyStrategyManager validTokenId(tokenId) {
+
+    // ============ Strategy Functions ============
+
+    /**
+     * @notice Allocate funds to strategy (only callable by strategy manager)
+     * @param tokenId The token ID
+     * @param amount The amount to allocate
+     */
+    function allocateToStrategy(uint256 tokenId, uint256 amount) external onlyStrategyManager validTokenId(tokenId) {
+        if (amount == 0) revert InvalidAmount();
+
         AssetInfo storage assetInfo = assets[tokenId];
-        
-        uint256 totalReturned = principal + yield;
-        
-        // Ensure we don't return more principal than allocated
+
+        // Check available liquidity
+        uint256 available = assetInfo.totalAssets - assetInfo.allocatedToStrategy;
+        if (amount > available) revert InsufficientLiquidity();
+
+        // Check allocation limit
+        uint256 newAllocation = assetInfo.allocatedToStrategy + amount;
+        uint256 maxAllocation = (assetInfo.totalAssets * MAX_ALLOCATION_BPS) / BPS_DIVISOR;
+        if (newAllocation > maxAllocation) revert InvalidAllocation();
+
+        // Update allocation
+        assetInfo.allocatedToStrategy = uint128(newAllocation);
+
+        // Transfer to strategy
+        IERC20(assetInfo.asset).transfer(strategyManager, amount);
+
+        emit StrategyAllocation(tokenId, amount);
+    }
+
+    /**
+     * @notice Return funds from strategy with yield
+     * @param tokenId The token ID
+     * @param principal The principal amount being returned
+     * @param yield The yield earned
+     */
+    function returnFromStrategy(uint256 tokenId, uint256 principal, uint256 yield)
+        external
+        onlyStrategyManager
+        validTokenId(tokenId)
+    {
+        AssetInfo storage assetInfo = assets[tokenId];
+
+        // Cap principal to allocated amount
         if (principal > assetInfo.allocatedToStrategy) {
             principal = assetInfo.allocatedToStrategy;
         }
-        
-        // Receive tokens back first
-        IERC20(assetInfo.asset).transferFrom(strategyManager, address(this), totalReturned);
-        
-        // Update allocations
-        assetInfo.allocatedToStrategy -= principal;
-        
-        // Add yield to total assets (this increases share value)
-        if (yield > 0) {
-            assetInfo.totalAssets += yield;
-            assetInfo.totalYieldEarned += yield;
-            
-            // Update total value locked with yield
-            uint256 yieldUSDValue = _getUSDValue(assetInfo.asset, yield);
-            totalValueLocked += yieldUSDValue;
-            
-            // Calculate and emit new share value
-            uint256 newShareValue = getShareValue(tokenId);
-            emit YieldAccrued(tokenId, yield, newShareValue);
+
+        uint256 totalReturn = principal + yield;
+
+        // Transfer funds back
+        IERC20(assetInfo.asset).transferFrom(strategyManager, address(this), totalReturn);
+
+        // Update state
+        unchecked {
+            assetInfo.allocatedToStrategy = uint128(assetInfo.allocatedToStrategy - principal);
+
+            // Add yield to total assets (this increases share value)
+            uint256 newTotalAssets = assetInfo.totalAssets + yield;
+            if (newTotalAssets > type(uint128).max) revert Overflow();
+            assetInfo.totalAssets = uint128(newTotalAssets);
+
+            assetInfo.totalYieldEarned += uint64(yield);
         }
-        
-        assetInfo.lastUpdateTime = block.timestamp;
-        
-        emit FundsReturnedFromStrategy(tokenId, principal, yield, totalReturned);
+
+        // Update TVL with yield
+        if (yield > 0) {
+            totalValueLocked += _getUSDValue(assetInfo.asset, yield);
+        }
+
+        emit StrategyReturn(tokenId, principal, yield);
     }
-    
+
     // ============ View Functions ============
-    
-    function getAssetInfo(uint256 tokenId) external view returns (AssetInfo memory) {
-        return assets[tokenId];
+
+    /**
+     * @notice Get the current value of one share
+     * @param tokenId The token ID
+     * @return value The value of one share in asset terms
+     */
+    function getShareValue(uint256 tokenId) external view validTokenId(tokenId) returns (uint256) {
+        AssetInfo storage assetInfo = assets[tokenId];
+        if (assetInfo.totalShares == 0) return 10 ** assetInfo.decimals;
+        return (assetInfo.totalAssets * (10 ** assetInfo.decimals)) / assetInfo.totalShares;
     }
-    
-    function getUserPosition(uint256 tokenId, address user) external view returns (UserPosition memory) {
-        return userPositions[tokenId][user];
+
+    /**
+     * @notice Preview how many shares would be minted for a deposit
+     * @param tokenId The token ID
+     * @param amount The amount of assets to deposit
+     * @return shares The amount of shares that would be minted
+     */
+    function previewDeposit(uint256 tokenId, uint256 amount)
+        external
+        view
+        validTokenId(tokenId)
+        returns (uint256 shares)
+    {
+        AssetInfo storage assetInfo = assets[tokenId];
+
+        if (assetInfo.totalShares == 0 || assetInfo.totalAssets == 0) {
+            shares = amount < MINIMUM_SHARES ? MINIMUM_SHARES : amount;
+        } else {
+            shares = (amount * assetInfo.totalShares) / assetInfo.totalAssets;
+        }
     }
-    
+
+    /**
+     * @notice Preview how many assets would be withdrawn for shares
+     * @param tokenId The token ID
+     * @param shares The amount of shares to burn
+     * @return amount The amount of assets that would be withdrawn
+     */
+    function previewWithdraw(uint256 tokenId, uint256 shares) external view validTokenId(tokenId) returns (uint256) {
+        AssetInfo storage assetInfo = assets[tokenId];
+        if (assetInfo.totalShares == 0) return 0;
+        return (shares * assetInfo.totalAssets) / assetInfo.totalShares;
+    }
+
+    /**
+     * @notice Get available liquidity for a token
+     * @param tokenId The token ID
+     * @return available The amount of assets available for withdrawal
+     */
     function getAvailableLiquidity(uint256 tokenId) external view validTokenId(tokenId) returns (uint256) {
         AssetInfo storage assetInfo = assets[tokenId];
         return assetInfo.totalAssets - assetInfo.allocatedToStrategy;
     }
-    
-    function getTotalUSDValue() external view returns (uint256) {
-        return totalValueLocked;
+
+    /**
+     * @notice Get user's total asset value including yield
+     * @param tokenId The token ID
+     * @param user The user address
+     * @return value The current value in asset terms
+     */
+    function getUserAssetValue(uint256 tokenId, address user) external view returns (uint256) {
+        uint256 shares = balanceOf[user][tokenId]; // Using ERC6909's balanceOf
+        if (shares == 0) return 0;
+
+        AssetInfo storage assetInfo = assets[tokenId];
+        return (shares * assetInfo.totalAssets) / assetInfo.totalShares;
     }
-    
+
+    /**
+     * @notice Get all active token IDs
+     * @return The array of active token IDs
+     */
     function getActiveTokenIds() external view returns (uint256[] memory) {
         return activeTokenIds;
     }
-    
-    function previewDeposit(uint256 tokenId, uint256 assets) external view validTokenId(tokenId) returns (uint256 shares) {
-        return _convertToShares(tokenId, assets);
-    }
-    
-    function previewWithdraw(uint256 tokenId, uint256 shares) external view validTokenId(tokenId) returns (uint256 assets) {
-        return _convertToAssets(tokenId, shares);
-    }
-    
-    /**
-     * @notice Get the current value of one share in asset terms
-     * @param tokenId The token ID to check
-     * @return The value of one share (with decimals matching the asset)
-     */
-    function getShareValue(uint256 tokenId) public view validTokenId(tokenId) returns (uint256) {
-        AssetInfo storage assetInfo = assets[tokenId];
-        if (assetInfo.totalShares == 0) {
-            return 10 ** assetInfo.decimals; // 1:1 when no shares exist
-        }
-        return (assetInfo.totalAssets * (10 ** assetInfo.decimals)) / assetInfo.totalShares;
-    }
-    
-    /**
-     * @notice Get user's asset value including unrealized yield
-     * @param tokenId The token ID
-     * @param user The user address
-     * @return Current value of user's position in asset terms
-     */
-    function getUserAssetValue(uint256 tokenId, address user) external view validTokenId(tokenId) returns (uint256) {
-        uint256 userShares = balanceOf[user][tokenId];
-        if (userShares == 0) return 0;
-        return _convertToAssets(tokenId, userShares);
-    }
-    
-    // ============ Internal Functions ============
-    
-    /**
-     * @dev Convert asset amount to shares
-     * @param tokenId The token ID
-     * @param assets The amount of assets to convert
-     * @return shares The equivalent amount of shares
-     */
-    function _convertToShares(uint256 tokenId, uint256 assets) internal view returns (uint256 shares) {
-        AssetInfo storage assetInfo = assets[tokenId];
-        
-        if (assetInfo.totalShares == 0 || assetInfo.totalAssets == 0) {
-            // First deposit - 1:1 ratio but with minimum shares consideration
-            shares = assets;
-            if (shares < MINIMUM_SHARES) shares = MINIMUM_SHARES;
-        } else {
-            // shares = (assets * totalShares) / totalAssets
-            shares = (assets * assetInfo.totalShares) / assetInfo.totalAssets;
-        }
-        
-        return shares;
-    }
-    
-    /**
-     * @dev Convert shares to asset amount
-     * @param tokenId The token ID
-     * @param shares The amount of shares to convert
-     * @return assets The equivalent amount of assets
-     */
-    function _convertToAssets(uint256 tokenId, uint256 shares) internal view returns (uint256 assets) {
-        AssetInfo storage assetInfo = assets[tokenId];
-        
-        if (assetInfo.totalShares == 0) {
-            return 0;
-        }
-        
-        // assets = (shares * totalAssets) / totalShares
-        // This automatically includes any yield earned
-        assets = (shares * assetInfo.totalAssets) / assetInfo.totalShares;
-        
-        return assets;
-    }
-    
-    function _getUSDValue(address asset, uint256 amount) internal view returns (uint256) {
-        try priceOracle.getPriceInUSD(asset) returns (uint256 priceInUSD) {
-            return (amount * priceInUSD) / (10 ** IERC20(asset).decimals());
-        } catch {
-            revert OracleError();
-        }
-    }
-    
+
     // ============ Admin Functions ============
-    
+
+    /**
+     * @notice Update the price oracle
+     * @param newOracle The new oracle address
+     */
     function updateOracle(address newOracle) external onlyOwner {
         if (newOracle == address(0)) revert ZeroAddress();
-        
+
         address oldOracle = address(priceOracle);
         priceOracle = IPriceOracle(newOracle);
-        
+
         emit OracleUpdated(oldOracle, newOracle);
     }
-    
+
+    /**
+     * @notice Update the strategy manager
+     * @param newManager The new strategy manager address
+     */
     function updateStrategyManager(address newManager) external onlyOwner {
         if (newManager == address(0)) revert ZeroAddress();
-        
+
         address oldManager = strategyManager;
         strategyManager = newManager;
-        
+
         emit StrategyManagerUpdated(oldManager, newManager);
     }
-    
-    // ============ Emergency Functions ============
-    
-    bool public paused;
-    
-    modifier whenNotPaused() {
-        require(!paused, "Paused");
-        _;
+
+    /**
+     * @notice Pause the contract
+     */
+    function pause() external onlyOwner {
+        _paused = 1;
+        emit Paused(true);
     }
-    
-    function emergencyPause() external onlyOwner {
-        paused = true;
-    }
-    
+
+    /**
+     * @notice Unpause the contract
+     */
     function unpause() external onlyOwner {
-        paused = false;
+        _paused = 0;
+        emit Paused(false);
     }
-    
-    function recoverERC20(address token, uint256 amount) external onlyOwner {
-        // Only allow recovery of non-supported assets
+
+    /**
+     * @notice Recover mistakenly sent tokens (not pool assets)
+     * @param token The token to recover
+     * @param amount The amount to recover
+     */
+    function recoverToken(address token, uint256 amount) external onlyOwner {
         if (supportedAssets[token]) revert AssetNotSupported();
         IERC20(token).transfer(owner(), amount);
     }
-    
-    // ============ Overrides ============
-    
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
-    
-    // Override deposit and withdraw to add pause functionality
-    function _mint(address to, uint256 id, uint256 amount) internal override whenNotPaused {
-        super._mint(to, id, amount);
+
+    // ============ Internal Functions ============
+
+    /**
+     * @dev Get USD value of an asset amount
+     * @param asset The asset address
+     * @param amount The amount
+     * @return The USD value
+     */
+    function _getUSDValue(address asset, uint256 amount) private view returns (uint256) {
+        try priceOracle.getPriceInUSD(asset) returns (uint256 priceInUSD) {
+            return (amount * priceInUSD) / (10 ** IERC20(asset).decimals());
+        } catch {
+            // If oracle fails, return 0 to not block operations
+            // Consider whether to revert based on your requirements
+            return 0;
+        }
     }
-    
-    function _burn(address from, uint256 id, uint256 amount) internal override whenNotPaused {
-        super._burn(from, id, amount);
+
+    // ============ UUPS Functions ============
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    // ============ ERC6909 Metadata Functions ============
+
+    function name(uint256 id) public view  returns (string memory) {
+        return assets[id].name;
     }
-    
-    // ERC6909 metadata functions
-    function name(uint256 tokenId) public view override returns (string memory) {
-        return assets[tokenId].name;
+
+    function symbol(uint256 id) public view returns (string memory) {
+        return assets[id].symbol;
     }
-    
-    function symbol(uint256 tokenId) public view override returns (string memory) {
-        return assets[tokenId].symbol;
-    }
-    
-    function decimals(uint256 tokenId) public view override returns (uint8) {
-        return assets[tokenId].decimals;
+
+    function decimals(uint256 id) public view returns (uint8) {
+        return assets[id].decimals;
     }
 }

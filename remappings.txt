@@ -3,3 +3,4 @@
 @clones=lib/clones-with-immutable-args/src/
 @chainlink/=lib/chainlink-evm/
 forge-std/=lib/forge-std/src/
+@solady/=lib/solady/src/
