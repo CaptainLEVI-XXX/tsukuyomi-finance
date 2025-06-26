@@ -264,6 +264,10 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
         emit StrategyRegistered(strategyId, name, strategyAddress, chainSelector);
     }
 
+    function supportNewPool(address poolAddress) external onlyOwner {
+        pools[nextPoolId++] = poolAddress;
+    }
+
     /**
      * @notice Add a supported chain
      * @param chainSelector CCIP chain selector
