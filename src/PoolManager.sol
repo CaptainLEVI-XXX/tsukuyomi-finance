@@ -129,11 +129,11 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     /**
      * @notice Add a new asset to the pool
      * @param asset The asset address
-     * @param name The asset name for ERC6909
-     * @param symbol The asset symbol for ERC6909
+     * @param _name The asset name for ERC6909
+     * @param _symbol The asset symbol for ERC6909
      * @return tokenId The assigned token ID
      */
-    function addAsset(address asset, string calldata name, string calldata symbol)
+    function addAsset(address asset, string calldata _name, string calldata _symbol)
         external
         onlyOwner
         returns (uint256 tokenId)
@@ -148,8 +148,8 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
             totalShares: 0,
             totalAssets: 0,
             allocatedToStrategy: 0,
-            name: name,
-            symbol: symbol,
+            name: _name,
+            symbol: _symbol,
             decimals: IERC20(asset).decimals(),
             isActive: true,
             lastUpdateTime: uint32(block.timestamp),
@@ -160,7 +160,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         supportedAssets[asset] = true;
         activeTokenIds.push(tokenId);
 
-        emit AssetAdded(tokenId, asset, name, symbol);
+        emit AssetAdded(tokenId, asset, _name, _symbol);
     }
 
     /**
@@ -491,7 +491,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
 
     // ============ ERC6909 Metadata Functions ============
 
-    function name(uint256 id) public view  returns (string memory) {
+    function name(uint256 id) public view returns (string memory) {
         return assets[id].name;
     }
 

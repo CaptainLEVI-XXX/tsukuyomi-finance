@@ -1,26 +1,27 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {PoolManager} from "../PoolManager.sol";
+
+// Pool Manager Interface
 interface IPoolManager {
-    function provideBatchFundsToStrategy(uint256[] calldata tokenIds, uint256[] calldata amounts)
-        external
-        returns (bool[] memory results);
-
-    function receiveBatchFundsFromStrategy(uint256[] calldata tokenIds, uint256[] calldata amounts)
-        external
-        returns (bool[] memory results);
-
-    function getRegisteredAssets() external view returns (uint256[] memory tokenIds, address[] memory assets);
-
+    function assets(uint256 tokenId) external view returns (PoolManager.AssetInfo memory);
+    function getAvailableLiquidity(uint256 tokenId) external view returns (uint256);
+    function allocateToStrategy(uint256 tokenId, uint256 amount) external;
+    function returnFromStrategy(uint256 tokenId, uint256 principal, uint256 yield) external;
     function getAllTokensInfo()
         external
         view
         returns (
-            uint256[] memory tokenIds,
-            address[] memory assets,
-            uint256[] memory totalAssetsInPool,
+            address[] memory assetAddresses,
+            string[] memory names,
+            uint256[] memory totalAssets,
             uint256[] memory allocatedToStrategy
         );
-
-    function asset(uint256 tokenId) external view returns (address);
+    function provideBatchFundsToStrategy(uint256[] calldata tokenIds, uint256[] calldata amounts)
+        external
+        returns (bool[] memory);
+    function receiveBatchFundsFromStrategy(uint256[] calldata tokenIds, uint256[] calldata amounts)
+        external
+        returns (bool[] memory);
 }

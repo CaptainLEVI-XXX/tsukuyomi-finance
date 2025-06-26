@@ -6,6 +6,7 @@ gas_reports = ["*"]
 optimizer = true
 optimizer_runs = 20000
 fs_permissions = [{ access = "read", path = "lib/foundry-chainlink-toolkit/out"}]
+via_ir=true
 
 # Remappings in remappings.txt
 
