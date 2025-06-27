@@ -7,6 +7,7 @@ import {Initializable} from "@solady/utils/Initializable.sol";
 import {ERC6909} from "@solmate/tokens/ERC6909.sol";
 import {IERC20} from "./interfaces/IERC20.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
+import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
 
 interface IPriceOracle {
     function getPrice(address asset) external view returns (uint256 price, uint8 decimals);
@@ -20,6 +21,7 @@ interface IPriceOracle {
  */
 contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     using CustomRevert for bytes4;
+    using SafeTransferLib for address;
 
     // ============ State Variables (Optimized Storage Layout) ============
 
@@ -96,28 +98,24 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     // ============ Modifiers ============
 
     modifier whenNotPaused() {
-        if (_paused == 1) revert Pause();
+        if (_paused == 1) Pause.selector.revertWith();
         _;
     }
 
     modifier onlyStrategyManager() {
-        if (msg.sender != strategyManager) revert UnauthorizedCaller();
+        if (msg.sender != strategyManager) UnauthorizedCaller.selector.revertWith();
         _;
     }
 
     modifier validTokenId(uint256 tokenId) {
-        if (tokenId == 0 || tokenId > _tokenIdCounter || !assets[tokenId].isActive) {
-            revert InvalidTokenId();
-        }
+        if (tokenId == 0 || tokenId > _tokenIdCounter || !assets[tokenId].isActive) InvalidTokenId.selector.revertWith();
         _;
     }
 
     // ============ Initialization ============
 
     function initialize(address _owner, address _strategyManager, address _priceOracle) public initializer {
-        if (_owner == address(0) || _strategyManager == address(0) || _priceOracle == address(0)) {
-            revert ZeroAddress();
-        }
+        if (_owner == address(0) || _strategyManager == address(0) || _priceOracle == address(0)) ZeroAddress.selector.revertWith();
 
         _initializeOwner(_owner);
         strategyManager = _strategyManager;
@@ -138,8 +136,8 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         onlyOwner
         returns (uint256 tokenId)
     {
-        if (asset == address(0)) revert ZeroAddress();
-        if (supportedAssets[asset]) revert AssetAlreadyExists();
+        if (asset == address(0)) ZeroAddress.selector.revertWith();
+        if (supportedAssets[asset]) AssetAlreadyExists.selector.revertWith();
 
         tokenId = ++_tokenIdCounter;
 
@@ -176,7 +174,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         validTokenId(tokenId)
         returns (uint256 shares)
     {
-        if (amount == 0) revert InvalidAmount();
+        if (amount == 0) InvalidAmount.selector.revertWith();
 
         AssetInfo storage assetInfo = assets[tokenId];
 
@@ -188,11 +186,11 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
             shares = amount < MINIMUM_SHARES ? MINIMUM_SHARES : amount;
         } else {
             shares = (amount * _totalShares) / _totalAssets;
-            if (shares < MINIMUM_SHARES) revert MinimumSharesRequired();
+            if (shares < MINIMUM_SHARES) MinimumSharesRequired.selector.revertWith();
         }
 
         // Transfer assets (CEI pattern)
-        IERC20(assetInfo.asset).transferFrom(msg.sender, address(this), amount);
+        assetInfo.asset.safeTransferFrom(msg.sender, address(this), amount);
 
         // Update state with overflow checks
         unchecked {
@@ -229,10 +227,10 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         validTokenId(tokenId)
         returns (uint256 amount)
     {
-        if (shares == 0) revert InvalidAmount();
+        if (shares == 0) InvalidAmount.selector.revertWith();
 
         // Check balance using ERC6909's balanceOf
-        if (balanceOf[msg.sender][tokenId] < shares) revert InsufficientBalance();
+        if (balanceOf[msg.sender][tokenId] < shares) InsufficientBalance.selector.revertWith();
 
         AssetInfo storage assetInfo = assets[tokenId];
 
@@ -241,7 +239,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
 
         // Check available liquidity
         uint256 available = assetInfo.totalAssets - assetInfo.allocatedToStrategy;
-        if (amount > available) revert InsufficientLiquidity();
+        if (amount > available) InsufficientLiquidity.selector.revertWith();
 
         // Burn shares first using ERC6909's _burn
         _burn(msg.sender, tokenId, shares);
@@ -257,7 +255,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         totalValueLocked -= _getUSDValue(assetInfo.asset, amount);
 
         // Transfer assets
-        IERC20(assetInfo.asset).transfer(receiver, amount);
+        assetInfo.asset.safeTransfer(receiver, amount);
 
         emit Withdrawal(tokenId, msg.sender, amount, shares);
     }
@@ -270,24 +268,24 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
      * @param amount The amount to allocate
      */
     function allocateToStrategy(uint256 tokenId, uint256 amount) external onlyStrategyManager validTokenId(tokenId) {
-        if (amount == 0) revert InvalidAmount();
+        if (amount == 0) InvalidAmount.selector.revertWith();
 
         AssetInfo storage assetInfo = assets[tokenId];
 
         // Check available liquidity
         uint256 available = assetInfo.totalAssets - assetInfo.allocatedToStrategy;
-        if (amount > available) revert InsufficientLiquidity();
+        if (amount > available) InsufficientLiquidity.selector.revertWith();
 
         // Check allocation limit
         uint256 newAllocation = assetInfo.allocatedToStrategy + amount;
         uint256 maxAllocation = (assetInfo.totalAssets * MAX_ALLOCATION_BPS) / BPS_DIVISOR;
-        if (newAllocation > maxAllocation) revert InvalidAllocation();
+        if (newAllocation > maxAllocation) InvalidAllocation.selector.revertWith();
 
         // Update allocation
         assetInfo.allocatedToStrategy = uint128(newAllocation);
 
         // Transfer to strategy
-        IERC20(assetInfo.asset).transfer(strategyManager, amount);
+        assetInfo.asset.safeTransfer(strategyManager, amount);
 
         emit StrategyAllocation(tokenId, amount);
     }
@@ -313,7 +311,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         uint256 totalReturn = principal + yield;
 
         // Transfer funds back
-        IERC20(assetInfo.asset).transferFrom(strategyManager, address(this), totalReturn);
+        assetInfo.asset.safeTransferFrom(strategyManager, address(this), totalReturn);
 
         // Update state
         unchecked {
@@ -321,7 +319,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
 
             // Add yield to total assets (this increases share value)
             uint256 newTotalAssets = assetInfo.totalAssets + yield;
-            if (newTotalAssets > type(uint128).max) revert Overflow();
+            if (newTotalAssets > type(uint128).max) Overflow.selector.revertWith();
             assetInfo.totalAssets = uint128(newTotalAssets);
 
             assetInfo.totalYieldEarned += uint64(yield);
@@ -420,7 +418,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
      * @param newOracle The new oracle address
      */
     function updateOracle(address newOracle) external onlyOwner {
-        if (newOracle == address(0)) revert ZeroAddress();
+        if (newOracle == address(0)) ZeroAddress.selector.revertWith();
 
         address oldOracle = address(priceOracle);
         priceOracle = IPriceOracle(newOracle);
@@ -433,7 +431,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
      * @param newManager The new strategy manager address
      */
     function updateStrategyManager(address newManager) external onlyOwner {
-        if (newManager == address(0)) revert ZeroAddress();
+        if (newManager == address(0)) ZeroAddress.selector.revertWith();
 
         address oldManager = strategyManager;
         strategyManager = newManager;
@@ -463,8 +461,8 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
      * @param amount The amount to recover
      */
     function recoverToken(address token, uint256 amount) external onlyOwner {
-        if (supportedAssets[token]) revert AssetNotSupported();
-        IERC20(token).transfer(owner(), amount);
+        if (supportedAssets[token]) AssetNotSupported.selector.revertWith();
+        token.safeTransfer(owner(), amount);
     }
 
     // ============ Internal Functions ============
@@ -501,5 +499,9 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
 
     function decimals(uint256 id) public view returns (uint8) {
         return assets[id].decimals;
+    }
+
+    function asset(uint256 id) public view returns (address) {
+        return assets[id].asset;
     }
 }

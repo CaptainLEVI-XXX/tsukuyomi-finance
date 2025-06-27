@@ -5,9 +5,11 @@ import {UUPSUpgradeable} from "@solady/utils/UUPSUpgradeable.sol";
 import {Ownable} from "@solady/auth/Ownable.sol";
 import {ReentrancyGuard} from "@solady/utils/ReentrancyGuard.sol";
 import {Initializable} from "@solady/utils/Initializable.sol";
-import {IERC20} from "./interfaces/IERC20.sol";
 import {IPoolManager} from "./interfaces/IPoolManager.sol";
 import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
+import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
+import {CustomRevert} from "./libraries/CustomRevert.sol";
+import {console} from "forge-std/console.sol";
 
 // CCIP Interfaces
 interface IRouterClient {
@@ -56,6 +58,8 @@ library Client {
  * @dev Handles cross-chain fund allocation, strategy execution, and position tracking
  */
 contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable, Initializable, IMessageReceiver {
+    using SafeTransferLib for address;
+    using CustomRevert for bytes4;
     // ============ Structs ============
 
     struct StrategyInfo {
@@ -185,27 +189,23 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
     error InsufficientLinkBalance();
     error StrategyNotActive();
     error ChainNotSupported();
+    error ZeroAddress();
+    error InvalidMaxAllocation();
 
     // ============ Modifiers ============
 
     modifier onlyController() {
-        if (msg.sender != controller && !allowedCallers[msg.sender]) {
-            revert UnauthorizedCaller();
-        }
+        if (msg.sender != controller && !allowedCallers[msg.sender]) UnauthorizedCaller.selector.revertWith();
         _;
     }
 
     modifier onlyCCIPRouter() {
-        if (msg.sender != address(ccipRouter)) {
-            revert UnauthorizedCaller();
-        }
+        if (msg.sender != address(ccipRouter)) UnauthorizedCaller.selector.revertWith();
         _;
     }
 
     modifier validStrategy(uint256 strategyId) {
-        if (!strategies[strategyId].isActive) {
-            revert StrategyNotActive();
-        }
+        if (!strategies[strategyId].isActive) StrategyNotActive.selector.revertWith();
         _;
     }
 
@@ -244,7 +244,7 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
         uint64 chainSelector,
         bytes4[4] calldata selectors // [deposit, withdraw, harvest, balance]
     ) external onlyOwner returns (uint256 strategyId) {
-        if (!chainInfo[chainSelector].isActive) revert ChainNotSupported();
+        if (!chainInfo[chainSelector].isActive) ChainNotSupported.selector.revertWith();
 
         strategyId = nextStrategyId++;
 
@@ -291,7 +291,7 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
      * @return poolId The assigned pool ID
      */
     function addPool(address poolAddress) external onlyOwner returns (uint256 poolId) {
-        if (poolAddress == address(0)) revert();
+        if (poolAddress == address(0)) ZeroAddress.selector.revertWith();
 
         poolId = nextPoolId++;
         pools[poolId] = poolAddress;
@@ -318,9 +318,11 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
     ) external onlyController validStrategy(strategyId) returns (uint256 depositId) {
         StrategyInfo memory strategy = strategies[strategyId];
 
+
         // Request funds from pool
         (uint256 totalAmount, address[] memory assets, uint256[] memory amounts) =
             _requestFundsFromPool(poolId, tokenIds, percentages);
+
 
         // If strategy is on current chain, invest directly
         if (strategy.chainSelector == currentChainSelector) {
@@ -397,6 +399,9 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
         returns (uint256 totalAmount, address[] memory assets, uint256[] memory amounts)
     {
         IPoolManager pool = IPoolManager(pools[poolId]);
+        console.log("Pool address: ", address(pool));
+
+
 
         // Calculate amounts based on percentages
         amounts = new uint256[](tokenIds.length);
@@ -405,7 +410,9 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
         for (uint256 i = 0; i < tokenIds.length; i++) {
             uint256 available = pool.getAvailableLiquidity(tokenIds[i]);
             amounts[i] = (available * percentages[i]) / BPS_DIVISOR;
-            assets[i] = pool.assets(tokenIds[i]).asset;
+            // console.log("Amount: ", amounts[i]);
+            assets[i] = pool.asset(tokenIds[i]);
+            // console.log("Asset: ", assets[i]);
         }
 
         // Request funds
@@ -423,7 +430,7 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
         uint256 totalAmount = _executeSwaps(assets, amounts, targetAsset);
 
         // Approve and deposit
-        IERC20(targetAsset).approve(strategy.strategyAddress, totalAmount);
+        targetAsset.safeApprove(strategy.strategyAddress, totalAmount);
 
         (bool success,) = strategy.strategyAddress.call(abi.encodeWithSelector(strategy.depositSelector, totalAmount));
         require(success, "Strategy deposit failed");
@@ -452,7 +459,7 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
             tokenAmounts[i] = Client.EVMTokenAmount({token: assets[i], amount: amounts[i]});
 
             // Approve CCIP router
-            IERC20(assets[i]).approve(address(ccipRouter), amounts[i]);
+            assets[i].safeApprove(address(ccipRouter), amounts[i]);
         }
 
         Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
@@ -465,9 +472,9 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
 
         // Get fee and send message
         uint256 fee = ccipRouter.getFee(strategy.chainSelector, message);
-        require(IERC20(linkToken).balanceOf(address(this)) >= fee, "Insufficient LINK");
-
-        IERC20(linkToken).approve(address(ccipRouter), fee);
+        if (linkToken.balanceOf(address(this)) < fee) InsufficientLinkBalance.selector.revertWith();
+        
+        linkToken.safeApprove(address(ccipRouter), fee);
         bytes32 messageId = ccipRouter.ccipSend(strategy.chainSelector, message);
 
         // Store deposit info
@@ -520,7 +527,7 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
             if (assets[i] == targetAsset) {
                 totalAmount += amounts[i];
             } else {
-                IERC20(assets[i]).approve(address(router), amounts[i]);
+                assets[i].safeApprove(address(router), amounts[i]);
 
                 ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
                     tokenIn: assets[i],
@@ -568,7 +575,7 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
 
         // Return to pool
         IPoolManager pool = IPoolManager(pools[poolId]);
-        IERC20(asset).approve(address(pool), amount);
+        asset.safeApprove(address(pool), amount);
 
         // Find token ID for asset (simplified)
         uint256 tokenId = 1; // Would look up actual token ID
@@ -648,7 +655,7 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
     }
 
     function updateMaxAllocation(uint256 newMax) external onlyOwner {
-        require(newMax <= BPS_DIVISOR, "Invalid max");
+        if (newMax > BPS_DIVISOR) InvalidMaxAllocation.selector.revertWith();
         maxAllocationPerStrategy = newMax;
     }
 

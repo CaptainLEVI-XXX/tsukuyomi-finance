@@ -11,8 +11,10 @@ import {ChainlinkPriceOracle} from "../src/PriceOracle.sol";
 // Import interfaces
 import {IStrategyIntegration} from "../src/interfaces/IStrategyIntegration.sol";
 // import {Client} from "../src/interfaces/ICCIP.sol";
+import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
 
 contract TestBase is Test {
+    using SafeTransferLib for address;
     // Test addresses
     address public owner = makeAddr("Owner");
     address public controller = makeAddr("Controller");
@@ -161,16 +163,18 @@ contract TestBase is Test {
 
     function _approveToken(address token, address spender, uint256 amount) internal {
         vm.prank(msg.sender);
-        MockERC20(token).approve(spender, amount);
+        token.safeApprove(spender, amount);
     }
 
     function _getTokenBalance(address token, address account) internal view returns (uint256) {
-        return MockERC20(token).balanceOf(account);
+        return token.balanceOf(account);
     }
 }
 
 // Mock Strategy Integration for testing
-contract MockStrategyIntegration is IStrategyIntegration {
+contract MockStrategyIntegration is IStrategyIntegration,Test {
+    using SafeTransferLib for address;
+
     address public immutable strategyManager;
     string public name;
 
@@ -187,7 +191,7 @@ contract MockStrategyIntegration is IStrategyIntegration {
         // For testing, assume we're depositing USDC
         address asset = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // USDC
 
-        MockERC20(asset).transferFrom(strategyManager, address(this), amount);
+        asset.safeTransferFrom(strategyManager, address(this), amount);
         balances[asset] += amount;
 
         return true;
@@ -199,7 +203,7 @@ contract MockStrategyIntegration is IStrategyIntegration {
         uint256 toWithdraw = amount > balances[asset] ? balances[asset] : amount;
         if (toWithdraw > 0) {
             balances[asset] -= toWithdraw;
-            MockERC20(asset).transfer(strategyManager, toWithdraw);
+            asset.safeTransfer(strategyManager, toWithdraw);
         }
 
         return toWithdraw;
@@ -211,7 +215,7 @@ contract MockStrategyIntegration is IStrategyIntegration {
         uint256 yield = yields[asset];
         if (yield > 0) {
             yields[asset] = 0;
-            MockERC20(asset).transfer(strategyManager, yield);
+            asset.safeTransfer(strategyManager, yield);
         }
 
         return yield;
@@ -231,10 +235,10 @@ contract MockStrategyIntegration is IStrategyIntegration {
     }
 
     // Test helper to simulate yield generation
-    // function generateYield(address asset, uint256 amount) external {
-    //     yields[asset] += amount;
-    //     deal(asset, address(this), MockERC20(asset).balanceOf(address(this)) + amount, true);
-    // }
+    function generateYield(address asset, uint256 amount) external {
+        yields[asset] += amount;
+        deal(asset, address(this), (asset.balanceOf(address(this)) + amount), true);
+    }
 }
 
 // // Simple Price Oracle for testing
@@ -254,12 +258,3 @@ contract MockStrategyIntegration is IStrategyIntegration {
 //         return prices[asset];
 //     }
 // }
-
-// Mock ERC20 interface
-interface MockERC20 {
-    function approve(address spender, uint256 amount) external returns (bool);
-    function transfer(address to, uint256 amount) external returns (bool);
-    function transferFrom(address from, address to, uint256 amount) external returns (bool);
-    function balanceOf(address account) external view returns (uint256);
-    function decimals() external view returns (uint8);
-}

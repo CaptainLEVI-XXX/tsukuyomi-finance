@@ -24,4 +24,5 @@ interface IPoolManager {
     function receiveBatchFundsFromStrategy(uint256[] calldata tokenIds, uint256[] calldata amounts)
         external
         returns (bool[] memory);
+    function asset(uint256 id) external view returns (address);
 }
