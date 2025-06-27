@@ -16,6 +16,7 @@ import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
 contract TestBase is Test {
     using SafeTransferLib for address;
     // Test addresses
+
     address public owner = makeAddr("Owner");
     address public controller = makeAddr("Controller");
     address public alice = makeAddr("Alice");
@@ -172,7 +173,7 @@ contract TestBase is Test {
 }
 
 // Mock Strategy Integration for testing
-contract MockStrategyIntegration is IStrategyIntegration,Test {
+contract MockStrategyIntegration is IStrategyIntegration, Test {
     using SafeTransferLib for address;
 
     address public immutable strategyManager;

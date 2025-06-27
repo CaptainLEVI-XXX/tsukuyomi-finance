@@ -8,11 +8,8 @@ import {ERC6909} from "@solmate/tokens/ERC6909.sol";
 import {IERC20} from "./interfaces/IERC20.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
-
-interface IPriceOracle {
-    function getPrice(address asset) external view returns (uint256 price, uint8 decimals);
-    function getPriceInUSD(address asset) external view returns (uint256 priceInUSD);
-}
+import {IPriceOracle} from "./interfaces/IPriceOracle.sol";
+import {Lock} from "./libraries/Lock.sol";
 
 /**
  * @title Enhanced Pool Manager
@@ -94,6 +91,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     error MinimumSharesRequired();
     error Overflow();
     error Pause();
+    error PoolManagerLocked();
 
     // ============ Modifiers ============
 
@@ -108,14 +106,26 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
     }
 
     modifier validTokenId(uint256 tokenId) {
-        if (tokenId == 0 || tokenId > _tokenIdCounter || !assets[tokenId].isActive) InvalidTokenId.selector.revertWith();
+        if (tokenId == 0 || tokenId > _tokenIdCounter || !assets[tokenId].isActive) {
+            InvalidTokenId.selector.revertWith();
+        }
         _;
+    }
+
+    /// @dev Modifier to prevent reentrancy attacks
+    modifier nonReentrant() {
+        if (Lock.isUnlocked()) PoolManagerLocked.selector.revertWith();
+        Lock.unlock();
+        _;
+        Lock.lock();
     }
 
     // ============ Initialization ============
 
     function initialize(address _owner, address _strategyManager, address _priceOracle) public initializer {
-        if (_owner == address(0) || _strategyManager == address(0) || _priceOracle == address(0)) ZeroAddress.selector.revertWith();
+        if (_owner == address(0) || _strategyManager == address(0) || _priceOracle == address(0)) {
+            ZeroAddress.selector.revertWith();
+        }
 
         _initializeOwner(_owner);
         strategyManager = _strategyManager;
@@ -172,6 +182,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         external
         whenNotPaused
         validTokenId(tokenId)
+        nonReentrant
         returns (uint256 shares)
     {
         if (amount == 0) InvalidAmount.selector.revertWith();
@@ -225,6 +236,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         external
         whenNotPaused
         validTokenId(tokenId)
+        nonReentrant
         returns (uint256 amount)
     {
         if (shares == 0) InvalidAmount.selector.revertWith();
@@ -267,7 +279,12 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
      * @param tokenId The token ID
      * @param amount The amount to allocate
      */
-    function allocateToStrategy(uint256 tokenId, uint256 amount) external onlyStrategyManager validTokenId(tokenId) {
+    function allocateToStrategy(uint256 tokenId, uint256 amount)
+        external
+        onlyStrategyManager
+        validTokenId(tokenId)
+        nonReentrant
+    {
         if (amount == 0) InvalidAmount.selector.revertWith();
 
         AssetInfo storage assetInfo = assets[tokenId];
@@ -300,6 +317,7 @@ contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909 {
         external
         onlyStrategyManager
         validTokenId(tokenId)
+        nonReentrant
     {
         AssetInfo storage assetInfo = assets[tokenId];
 

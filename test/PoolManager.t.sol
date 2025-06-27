@@ -120,7 +120,6 @@ contract PoolManagerTest is TestBase {
     }
 
     function test_StrategyAllocationAndReturn() public {
-        
         uint256 depositAmount = 2_000e6; // 2,000 USDC
 
         // Alice deposits
@@ -210,9 +209,9 @@ contract PoolManagerTest is TestBase {
 
     function test_MultiAssetPool() public {
         // Test with multiple assets in the pool
-        uint256 usdcAmount = 1_000e6;  // 1,000 USDC
-        uint256 usdtAmount = 2_000e6;  // 2,000 USDT
-        uint256 daiAmount = 500e18;    // 500 DAI
+        uint256 usdcAmount = 1_000e6; // 1,000 USDC
+        uint256 usdtAmount = 2_000e6; // 2,000 USDT
+        uint256 daiAmount = 500e18; // 500 DAI
 
         vm.startPrank(alice);
 
@@ -225,7 +224,6 @@ contract PoolManagerTest is TestBase {
         uint256 usdcShares = poolManager.deposit(usdcTokenId, usdcAmount, alice);
         uint256 usdtShares = poolManager.deposit(usdtTokenId, usdtAmount, alice);
         uint256 daiShares = poolManager.deposit(daiTokenId, daiAmount, alice);
-
 
         // Check individual balances
         assertEq(poolManager.balanceOf(alice, usdcTokenId), usdcShares, "USDC shares incorrect");

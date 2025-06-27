@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {TestBase,MockStrategyIntegration} from "./Base.t.sol";
+import {TestBase, MockStrategyIntegration} from "./Base.t.sol";
 // import {MockStrategyIntegration} from "./MockStrategyIntegration.sol";
 import {CrossChainStrategyManager} from "../src/CrossChainStrategyManager.sol";
 import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
@@ -130,7 +130,8 @@ contract CrossChainStrategyManagerTest is TestBase {
 
         // Check initial state
         uint256 poolBalanceBefore = poolManager.getAvailableLiquidity(usdcTokenId);
-        CrossChainStrategyManager.AllocationInfo memory allocationBefore = strategyManager.getAllocation(aaveStrategyId, USDC);
+        CrossChainStrategyManager.AllocationInfo memory allocationBefore =
+            strategyManager.getAllocation(aaveStrategyId, USDC);
 
         // Withdraw half from strategy back to pool
         uint256 withdrawAmount = allocationBefore.principal / 2;
@@ -138,7 +139,8 @@ contract CrossChainStrategyManagerTest is TestBase {
 
         // Check final state
         uint256 poolBalanceAfter = poolManager.getAvailableLiquidity(usdcTokenId);
-        CrossChainStrategyManager.AllocationInfo memory allocationAfter = strategyManager.getAllocation(aaveStrategyId, USDC);
+        CrossChainStrategyManager.AllocationInfo memory allocationAfter =
+            strategyManager.getAllocation(aaveStrategyId, USDC);
 
         // Pool should receive the withdrawn amount
         assertEq(poolBalanceAfter - poolBalanceBefore, withdrawAmount, "Pool didn't receive withdrawn funds");
@@ -179,8 +181,10 @@ contract CrossChainStrategyManagerTest is TestBase {
         strategyManager.investCrossChain(1, morphoStrategyId, usdtOnly, usdtPercentage, USDC);
 
         // Check both strategies have allocations
-        CrossChainStrategyManager.AllocationInfo memory aaveAllocation = strategyManager.getAllocation(aaveStrategyId, USDC);
-        CrossChainStrategyManager.AllocationInfo memory morphoAllocation = strategyManager.getAllocation(morphoStrategyId, USDC);
+        CrossChainStrategyManager.AllocationInfo memory aaveAllocation =
+            strategyManager.getAllocation(aaveStrategyId, USDC);
+        CrossChainStrategyManager.AllocationInfo memory morphoAllocation =
+            strategyManager.getAllocation(morphoStrategyId, USDC);
 
         assertGt(aaveAllocation.principal, 0, "AAVE should have allocation");
         assertGt(morphoAllocation.principal, 0, "Morpho should have allocation");

@@ -318,11 +318,9 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
     ) external onlyController validStrategy(strategyId) returns (uint256 depositId) {
         StrategyInfo memory strategy = strategies[strategyId];
 
-
         // Request funds from pool
         (uint256 totalAmount, address[] memory assets, uint256[] memory amounts) =
             _requestFundsFromPool(poolId, tokenIds, percentages);
-
 
         // If strategy is on current chain, invest directly
         if (strategy.chainSelector == currentChainSelector) {
@@ -401,8 +399,6 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
         IPoolManager pool = IPoolManager(pools[poolId]);
         console.log("Pool address: ", address(pool));
 
-
-
         // Calculate amounts based on percentages
         amounts = new uint256[](tokenIds.length);
         assets = new address[](tokenIds.length);
@@ -473,7 +469,7 @@ contract CrossChainStrategyManager is UUPSUpgradeable, ReentrancyGuard, Ownable,
         // Get fee and send message
         uint256 fee = ccipRouter.getFee(strategy.chainSelector, message);
         if (linkToken.balanceOf(address(this)) < fee) InsufficientLinkBalance.selector.revertWith();
-        
+
         linkToken.safeApprove(address(ccipRouter), fee);
         bytes32 messageId = ccipRouter.ccipSend(strategy.chainSelector, message);
 
