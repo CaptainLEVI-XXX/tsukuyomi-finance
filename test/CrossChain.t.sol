@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {TestBase, MockStrategyIntegration} from "./Base.t.sol";
-// import {MockStrategyIntegration} from "./MockStrategyIntegration.sol";
+import {TestBase} from "./Base.t.sol";
+import {MockStrategyIntegration} from "./mocks/MockStrategyIntegration.sol";
 import {CrossChainStrategyManager} from "../src/CrossChainStrategyManager.sol";
 import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
 
