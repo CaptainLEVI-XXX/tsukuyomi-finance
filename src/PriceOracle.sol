@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Ownable} from "@solady/auth/Ownable.sol";
-import {IAggregatorV3Interface} from "./interfaces/IAggregatorV3Interface.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 /**
  * @title Chainlink Price Oracle
@@ -10,7 +10,7 @@ import {IAggregatorV3Interface} from "./interfaces/IAggregatorV3Interface.sol";
  */
 contract ChainlinkPriceOracle is Ownable {
     struct PriceFeed {
-        IAggregatorV3Interface feed;
+        AggregatorV3Interface feed;
         uint256 heartbeat; // Maximum acceptable time between updates (seconds)
         bool isActive;
     }
@@ -44,7 +44,7 @@ contract ChainlinkPriceOracle is Ownable {
         if (asset == address(0) || feed == address(0)) revert InvalidPriceFeed();
 
         priceFeeds[asset] = PriceFeed({
-            feed: IAggregatorV3Interface(feed),
+            feed: AggregatorV3Interface(feed),
             heartbeat: heartbeat > 0 ? heartbeat : MAX_PRICE_AGE,
             isActive: true
         });
@@ -58,7 +58,7 @@ contract ChainlinkPriceOracle is Ownable {
     function updatePriceFeed(address asset, address feed, uint256 heartbeat) external onlyOwner {
         if (!priceFeeds[asset].isActive) revert AssetNotSupported();
 
-        priceFeeds[asset].feed = IAggregatorV3Interface(feed);
+        priceFeeds[asset].feed = AggregatorV3Interface(feed);
         priceFeeds[asset].heartbeat = heartbeat > 0 ? heartbeat : MAX_PRICE_AGE;
 
         emit PriceFeedUpdated(asset, feed, heartbeat);
