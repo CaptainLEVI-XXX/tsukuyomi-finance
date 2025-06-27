@@ -11,6 +11,8 @@ contract CrossChainStrategyManagerTest is TestBase {
 
     uint256 aaveStrategyId = 1;
     uint256 morphoStrategyId = 2;
+    uint256 aaveCrossChainStrategyId = 3;
+    uint256 morphoCrossChainStrategyId = 4;
 
     function setUp() public override {
         super.setUp();
@@ -247,5 +249,51 @@ contract CrossChainStrategyManagerTest is TestBase {
         // In a real implementation, funds would be withdrawn from strategy
         // For now, just check the event was emitted
         vm.stopPrank();
+    }
+
+
+    function test_crossChainDeposit() public{
+        uint256 poolId = 1; // First pool
+
+        // Controller invests from pool to AAVE strategy
+        vm.startPrank(controller);
+
+        // Prepare investment parameters
+        uint256[] memory tokenIds = new uint256[](1);
+        tokenIds[0] = usdcTokenId;
+
+        uint256[] memory percentages = new uint256[](1);
+        percentages[0] = 5000; // 50% of available funds
+
+        // Check balances before
+        uint256 poolUsdcBefore = poolManager.getAvailableLiquidity(usdcTokenId);
+        uint256 strategyUsdcBefore = aaveIntegration.getBalance(USDC);
+
+        // Invest in AAVE
+        uint256 depositId = strategyManager.investCrossChain(
+            poolId,
+            aaveStrategyId,
+            tokenIds,
+            percentages,
+            USDC // target asset
+        );
+
+        // Check balances after
+        uint256 poolUsdcAfter = poolManager.getAvailableLiquidity(usdcTokenId);
+        uint256 strategyUsdcAfter = aaveIntegration.getBalance(USDC);
+
+        // Assertions
+        uint256 invested = poolUsdcBefore - poolUsdcAfter;
+        assertEq(invested, 2_500e6, "Should invest 50% of 5000 USDC");
+        assertEq(strategyUsdcAfter - strategyUsdcBefore, invested, "Strategy balance incorrect");
+
+        // Check allocation tracking
+        CrossChainStrategyManager.AllocationInfo memory allocation = strategyManager.getAllocation(aaveStrategyId, USDC);
+        assertEq(allocation.principal, invested, "Principal tracking incorrect");
+        assertEq(allocation.currentValue, invested, "Current value incorrect");
+        assertTrue(allocation.isActive, "Allocation should be active");
+
+        vm.stopPrank();
+
     }
 }

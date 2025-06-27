@@ -4,3 +4,4 @@
 @chainlink/=lib/chainlink-evm/
 forge-std/=lib/forge-std/src/
 @solady/=lib/solady/src/
+@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/
