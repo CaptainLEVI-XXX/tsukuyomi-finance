@@ -404,7 +404,7 @@ contract CrossChainStrategyManager is
         
         // If strategy is on current chain, invest directly
         if (strategy.chainSelector == currentChainSelector) {
-            _investLocally(strategyId, targetAsset, assets, amounts);
+            _investLocally(strategyId, targetAsset, assets, amounts,false);
             depositId = nextDepositId++;
             return depositId;
         }
@@ -485,9 +485,12 @@ contract CrossChainStrategyManager is
         }
         
         emit CCIPMessageReceived(message.messageId, message.sourceChainSelector, ccMessage.messageType);
+
+        console.log("++++++++Inside CCIP RECEIVE++++++++++");
         
         // Route to appropriate handler
         if (ccMessage.messageType == MessageType.DepositRequest) {
+             console.log("++++++++Inside DEPOSIT REQUEST++++++++++");
             _handleDepositRequest(message, ccMessage);
         } else if (ccMessage.messageType == MessageType.WithdrawRequest) {
             _handleWithdrawRequest(message, ccMessage);
@@ -529,20 +532,33 @@ contract CrossChainStrategyManager is
         uint256 strategyId,
         address targetAsset,
         address[] memory assets,
-        uint256[] memory amounts
+        uint256[] memory amounts,
+        bool isCrosschain
     ) internal {
         StrategyInfo storage strategy = strategies[strategyId];
-        
+
+        uint256 totalAmount = amounts[0];
+        if(!isCrosschain){
+        totalAmount=0;
         // Swap to target asset if needed
-        uint256 totalAmount = _executeSwaps(assets, amounts, targetAsset);
+        totalAmount = _executeSwaps(assets, amounts, targetAsset);
+        console.log("Total amount",totalAmount);
+        }
+        console.log("DSDDEDE");
+
+        console.log("targetAsset",targetAsset);
         
         // Approve and deposit
-        IERC20(targetAsset).approve(strategy.strategyAddress, totalAmount);
+        IERC20(0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913).approve(strategy.strategyAddress, totalAmount);
+
+         console.log("DSDDEDE");
         
         (bool success,) = strategy.strategyAddress.call(
             abi.encodeWithSelector(strategy.depositSelector, totalAmount)
         );
         require(success, "Strategy deposit failed");
+
+         console.log("DSDDEDE");
         
         // Update allocation
         _updateAllocation(strategyId, targetAsset, totalAmount, true);
@@ -680,17 +696,23 @@ contract CrossChainStrategyManager is
         Client.Any2EVMMessage calldata message,
         CrossChainMessage memory ccMessage
     ) internal {
+        console.log("++++++++Inside DEPOSIT REQUEST++++++++++");
         // Execute deposit on this chain
         address[] memory assets = new address[](message.destTokenAmounts.length);
         uint256[] memory amounts = new uint256[](message.destTokenAmounts.length);
+        console.log("++++++++message.destTokenAmounts.length++++++++++",message.destTokenAmounts.length);
         
         for (uint256 i = 0; i < message.destTokenAmounts.length; i++) {
             assets[i] = message.destTokenAmounts[i].token;
             amounts[i] = message.destTokenAmounts[i].amount;
         }
+
+        console.log("++++++++Invest locally++++++++++");
         
         // Invest locally
-        _investLocally(ccMessage.strategyId, ccMessage.asset, assets, amounts);
+        _investLocally(ccMessage.strategyId, ccMessage.asset, assets, amounts,true);
+
+        console.log("++++++++Send locally++++++++++");
         
         // Send confirmation back to source chain
         _sendDepositConfirmation(
@@ -881,9 +903,12 @@ contract CrossChainStrategyManager is
         address targetAsset
     ) internal returns (uint256 totalAmount) {
         ISwapRouter router = ISwapRouter(swapRouters[currentChainSelector]);
+
+        // console.log("Current chain selector",targetAsset);
         
         for (uint256 i = 0; i < assets.length; i++) {
             if (assets[i] == targetAsset) {
+                console.log("Asset is target asset");
                 totalAmount += amounts[i];
             } else {
                 IERC20(assets[i]).approve(address(router), amounts[i]);
