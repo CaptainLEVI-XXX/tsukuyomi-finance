@@ -2,48 +2,37 @@
 pragma solidity ^0.8.28;
 
 import {BaseStrategyIntegration} from "../AbstractStrategyImpl.sol";
+import {IPoolAave} from "../interfaces/IPoolAave.sol";
+import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
 
 /**
  * @title AaveV3Integration
  * @notice Example integration for Aave V3
  */
-contract AaveV3Integration is BaseStrategyIntegration {
-    address public immutable aavePool;
+abstract contract AaveV3Integration is BaseStrategyIntegration {
+    using SafeTransferLib for address;
+
+    IPoolAave public immutable aavePool;
     mapping(address => address) public aTokens; // asset => aToken
 
     constructor(address _strategyManager, address _owner, address _aavePool)
         BaseStrategyIntegration(_strategyManager, _owner)
     {
-        aavePool = _aavePool;
+        aavePool = IPoolAave(_aavePool);
     }
 
     function _depositToProtocol(address asset, uint256 amount) internal override returns (bool) {
-        // Approve and supply to Aave
-        // IERC20(asset).approve(aavePool, amount);
-        // IPool(aavePool).supply(asset, amount, address(this), 0);
+        asset.safeApprove(address(aavePool), amount);
+        aavePool.supply(asset, amount, address(this), 0);
         return true;
     }
 
     function _withdrawFromProtocol(address asset, uint256 amount) internal override returns (uint256) {
-        // Withdraw from Aave
-        // return IPool(aavePool).withdraw(asset, amount, address(this));
+        aavePool.withdraw(asset, amount, address(this));
         return amount;
     }
 
-    function _harvestFromProtocol(address asset) internal override returns (uint256) {
-        // Calculate and collect yield from Aave
-        // Yield is automatically accrued in aTokens
-        return 0;
-    }
-
     function _getProtocolBalance(address asset) internal view override returns (uint256) {
-        // Return aToken balance
-        // return IERC20(aTokens[asset]).balanceOf(address(this));
-        return 0;
-    }
-
-    function _emergencyWithdrawFromProtocol(address asset) internal override returns (uint256) {
-        // Withdraw all from Aave
-        return _getProtocolBalance(asset);
+        return aTokens[asset].balanceOf(address(this));
     }
 }

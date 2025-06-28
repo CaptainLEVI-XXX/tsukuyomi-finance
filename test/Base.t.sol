@@ -6,11 +6,9 @@ import {Test} from "forge-std/Test.sol";
 import {PoolManager} from "../src/PoolManager.sol";
 import {CrossChainStrategyManager} from "../src/CrossChainStrategyManager.sol";
 import {ChainlinkPriceOracle} from "../src/PriceOracle.sol";
-// import {MockERC20} from "./mocks/MockERC20.sol";
 
 // Import interfaces
 import {IStrategyIntegration} from "../src/interfaces/IStrategyIntegration.sol";
-// import {Client} from "../src/interfaces/ICCIP.sol";
 import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
 import {MockStrategyIntegration} from "./mocks/MockStrategyIntegration.sol";
 
@@ -44,7 +42,7 @@ contract TestBase is Test {
     address public constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address public constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
     address public constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
-    address public constant LINK =0x514910771AF9Ca656af840dff83E8264EcF986CA;
+    address public constant LINK = 0x514910771AF9Ca656af840dff83E8264EcF986CA;
 
     // Protocol addresses
     address public constant AAVE_POOL = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
@@ -122,10 +120,9 @@ contract TestBase is Test {
         vm.startPrank(owner);
 
         // Register strategies with proper selectors
-        bytes4[4] memory aaveSelectors = [
+        bytes4[3] memory aaveSelectors = [
             aaveIntegration.deposit.selector,
             aaveIntegration.withdraw.selector,
-            aaveIntegration.harvest.selector,
             aaveIntegration.getBalance.selector
         ];
 
@@ -133,10 +130,9 @@ contract TestBase is Test {
             "AAVE V3 Strategy", address(aaveIntegration), mainnetChainSelector, aaveSelectors
         );
 
-        bytes4[4] memory morphoSelectors = [
+        bytes4[3] memory morphoSelectors = [
             morphoIntegration.deposit.selector,
             morphoIntegration.withdraw.selector,
-            morphoIntegration.harvest.selector,
             morphoIntegration.getBalance.selector
         ];
 
@@ -172,6 +168,3 @@ contract TestBase is Test {
         return token.balanceOf(account);
     }
 }
-
-
-

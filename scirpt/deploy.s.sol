@@ -33,9 +33,6 @@ contract DeployScript is Script {
     ChainlinkPriceOracle internal priceOracleOnFuji;
     ChainlinkPriceOracle internal priceOracleOnBase;
     
-
-    
-
     
     function run() public {
         vm.startBroadcast();
@@ -45,6 +42,7 @@ contract DeployScript is Script {
 
     function _deployPriceOracle() internal {
         priceOracleOnFuji = new ChainlinkPriceOracle(owner);
+        priceOracleOnFuji.addPriceFeed(USDC_AVA, AGGREGATOR_ORACLE_AVA, 3600); // Chainlink USDC/USD
     }
 
     function _deployStrategyManager() internal {
@@ -56,6 +54,10 @@ contract DeployScript is Script {
         ERC1967Proxy strategyManagerOnFujiProxy = new ERC1967Proxy(address(strategyManagerOnFuji), data);
 
         strategyManagerOnFuji = CrossChainStrategyManager(address(strategyManagerOnFujiProxy));
+
+        strategyManagerOnFuji.addChain(mainnetChainSelector, address(strategyManagerOnFuji), UNISWAP_ROUTER_AVA);
+        // needs to done after base is deployed
+        // strategyManagerOnFuji.addChain(baseChainSelector, address(strategyManagerOnFuji), UNISWAP_ROUTER_BASE);
 
     }
 
@@ -74,6 +76,16 @@ contract DeployScript is Script {
         lowRiskPoolManagerOnFuji = PoolManager(address(lowRiskPoolManagerOnFujiProxy));
         highRiskPoolManagerOnFuji = PoolManager(address(highRiskPoolManagerOnFujiProxy));
         mediumRiskPoolManagerOnFuji = PoolManager(address(mediumRiskPoolManagerOnFujiProxy));
+
+
+        usdcTokenId = lowRiskPoolManagerOnFuji.addAsset(USDC_AVA, "Pool USDC", "pUSDC");
+        usdtTokenId = highRiskPoolManagerOnFuji.addAsset(USDC_AVA, "Pool USDC", "pUSDC");
+        daiTokenId = mediumRiskPoolManagerOnFuji.addAsset(USDC_AVA, "Pool USDC", "pUSDC");
+
+
+        strategyManagerOnFuji.addPool(address(lowRiskPoolManagerOnFuji));
+        strategyManagerOnFuji.addPool(address(highRiskPoolManagerOnFuji));
+        strategyManagerOnFuji.addPool(address(mediumRiskPoolManagerOnFuji));
 
     }
 

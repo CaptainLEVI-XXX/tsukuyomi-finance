@@ -11,8 +11,6 @@ contract CrossChainStrategyManagerTest is TestBase {
 
     uint256 aaveStrategyId = 1;
     uint256 morphoStrategyId = 2;
-    uint256 aaveCrossChainStrategyId = 3;
-    uint256 morphoCrossChainStrategyId = 4;
 
     function setUp() public override {
         super.setUp();
@@ -68,7 +66,8 @@ contract CrossChainStrategyManagerTest is TestBase {
             aaveStrategyId,
             tokenIds,
             percentages,
-            USDC // target asset
+            USDC,
+            address(0) // target asset
         );
 
         // Check balances after
@@ -89,36 +88,6 @@ contract CrossChainStrategyManagerTest is TestBase {
         vm.stopPrank();
     }
 
-    function test_YieldHarvestingFlow() public {
-        // First invest funds
-        vm.startPrank(controller);
-
-        uint256[] memory tokenIds = new uint256[](1);
-        tokenIds[0] = usdcTokenId;
-        uint256[] memory percentages = new uint256[](1);
-        percentages[0] = 4000; // 40%
-
-        strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC);
-
-        // Generate yield in the strategy
-        uint256 yieldAmount = 200e6; // 200 USDC yield
-        aaveIntegration.generateYield(USDC, yieldAmount);
-
-        // Harvest yield
-        address[] memory assets = new address[](1);
-        assets[0] = USDC;
-
-        uint256 strategyBalanceBefore = aaveIntegration.getBalance(USDC);
-
-        strategyManager.harvestYield(aaveStrategyId, assets);
-
-        // Check allocation updated with yield
-        CrossChainStrategyManager.AllocationInfo memory allocation = strategyManager.getAllocation(aaveStrategyId, USDC);
-        assertEq(allocation.currentValue, allocation.principal + yieldAmount, "Yield not reflected in current value");
-
-        vm.stopPrank();
-    }
-
     function test_WithdrawFromStrategy() public {
         // Setup: Invest first
         vm.startPrank(controller);
@@ -128,7 +97,7 @@ contract CrossChainStrategyManagerTest is TestBase {
         uint256[] memory percentages = new uint256[](1);
         percentages[0] = 6000; // 60%
 
-        strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC);
+        strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC, address(0));
 
         // Check initial state
         uint256 poolBalanceBefore = poolManager.getAvailableLiquidity(usdcTokenId);
@@ -172,7 +141,7 @@ contract CrossChainStrategyManagerTest is TestBase {
         uint256[] memory usdcPercentage = new uint256[](1);
         usdcPercentage[0] = 3000;
 
-        strategyManager.investCrossChain(1, aaveStrategyId, usdcOnly, usdcPercentage, USDC);
+        strategyManager.investCrossChain(1, aaveStrategyId, usdcOnly, usdcPercentage, USDC, address(0));
 
         // Invest USDT in Morpho (will be swapped to USDC)
         uint256[] memory usdtOnly = new uint256[](1);
@@ -180,7 +149,7 @@ contract CrossChainStrategyManagerTest is TestBase {
         uint256[] memory usdtPercentage = new uint256[](1);
         usdtPercentage[0] = 2000;
 
-        strategyManager.investCrossChain(1, morphoStrategyId, usdtOnly, usdtPercentage, USDC);
+        strategyManager.investCrossChain(1, morphoStrategyId, usdtOnly, usdtPercentage, USDC, address(0));
 
         // Check both strategies have allocations
         CrossChainStrategyManager.AllocationInfo memory aaveAllocation =
@@ -220,7 +189,7 @@ contract CrossChainStrategyManagerTest is TestBase {
 
         // 30% should work
         percentages[0] = 3000;
-        uint256 depositId = strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC);
+        uint256 depositId = strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC,address(0));
         assertGt(depositId, 0, "Investment should succeed with 30%");
 
         vm.stopPrank();
@@ -235,7 +204,7 @@ contract CrossChainStrategyManagerTest is TestBase {
         uint256[] memory percentages = new uint256[](1);
         percentages[0] = 5000;
 
-        strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC);
+        strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC,address(0));
         vm.stopPrank();
 
         // Owner performs emergency withdrawal
@@ -250,7 +219,6 @@ contract CrossChainStrategyManagerTest is TestBase {
         // For now, just check the event was emitted
         vm.stopPrank();
     }
-
 
     function test_crossChainDeposit() public{
         uint256 poolId = 1; // First pool
@@ -275,7 +243,8 @@ contract CrossChainStrategyManagerTest is TestBase {
             aaveStrategyId,
             tokenIds,
             percentages,
-            USDC // target asset
+            USDC,
+            address(0) // target asset
         );
 
         // Check balances after

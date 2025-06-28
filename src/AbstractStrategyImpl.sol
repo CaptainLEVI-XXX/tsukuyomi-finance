@@ -3,20 +3,22 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "./interfaces/IERC20.sol";
 import {IStrategyIntegration} from "./interfaces/IStrategyIntegration.sol";
-import {ReentrancyGuard} from "@solady/utils/ReentrancyGuard.sol";
 import {Ownable} from "@solady/auth/Ownable.sol";
+import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
+import {CustomRevert} from "./libraries/CustomRevert.sol";
 
 /**
  * @title BaseStrategyIntegration
  * @notice Template for strategy integrations (e.g., Aave, Compound, Yearn, etc.)
  * @dev Each protocol integration would extend this base template
  */
-abstract contract BaseStrategyIntegration is IStrategyIntegration, ReentrancyGuard, Ownable {
+abstract contract BaseStrategyIntegration is IStrategyIntegration, Ownable {
+    using SafeTransferLib for address;
+    using CustomRevert for bytes4;
     // ============ State Variables ============
 
     address public immutable strategyManager;
     mapping(address => uint256) public totalDeposited;
-    mapping(address => uint256) public totalHarvested;
 
     // ============ Events ============
 
@@ -34,7 +36,7 @@ abstract contract BaseStrategyIntegration is IStrategyIntegration, ReentrancyGua
     // ============ Modifiers ============
 
     modifier onlyStrategyManager() {
-        if (msg.sender != strategyManager) revert UnauthorizedCaller();
+        if (msg.sender != strategyManager) UnauthorizedCaller.selector.revertWith();
         _;
     }
 
@@ -58,19 +60,9 @@ abstract contract BaseStrategyIntegration is IStrategyIntegration, ReentrancyGua
     function _withdrawFromProtocol(address asset, uint256 amount) internal virtual returns (uint256);
 
     /**
-     * @dev Protocol-specific harvest logic
-     */
-    function _harvestFromProtocol(address asset) internal virtual returns (uint256);
-
-    /**
      * @dev Get protocol-specific balance
      */
     function _getProtocolBalance(address asset) internal view virtual returns (uint256);
-
-    /**
-     * @dev Emergency withdrawal from protocol
-     */
-    function _emergencyWithdrawFromProtocol(address asset) internal virtual returns (uint256);
 
     // ============ External Functions ============
 
@@ -79,14 +71,11 @@ abstract contract BaseStrategyIntegration is IStrategyIntegration, ReentrancyGua
      * @param amount Amount to deposit
      * @return success Whether the deposit was successful
      */
-    function deposit(uint256 amount) external override onlyStrategyManager nonReentrant returns (bool) {
-        if (amount == 0) revert InvalidAmount();
-
-        // Assume single asset for simplicity - would be passed as parameter in production
-        address asset = address(0); // Would get from strategy manager
+    function deposit(uint256 amount, address asset) external override onlyStrategyManager returns (bool) {
+        if (amount == 0) InvalidAmount.selector.revertWith();
 
         // Transfer assets from strategy manager
-        IERC20(asset).transferFrom(strategyManager, address(this), amount);
+        asset.safeTransferFrom(strategyManager, address(this), amount);
 
         // Deposit to protocol
         bool success = _depositToProtocol(asset, amount);
@@ -105,18 +94,12 @@ abstract contract BaseStrategyIntegration is IStrategyIntegration, ReentrancyGua
      * @param asset Asset to withdraw
      * @return actualAmount Amount actually withdrawn
      */
-    function withdraw(uint256 amount, address asset)
-        external
-        override
-        onlyStrategyManager
-        nonReentrant
-        returns (uint256)
-    {
-        if (amount == 0) revert InvalidAmount();
+    function withdraw(uint256 amount, address asset) external override onlyStrategyManager returns (uint256) {
+        if (amount == 0) InvalidAmount.selector.revertWith();
 
         uint256 actualAmount = _withdrawFromProtocol(asset, amount);
 
-        if (actualAmount == 0) revert WithdrawalFailed();
+        if (actualAmount == 0) WithdrawalFailed.selector.revertWith();
 
         // Update accounting
         if (actualAmount <= totalDeposited[asset]) {
@@ -126,30 +109,10 @@ abstract contract BaseStrategyIntegration is IStrategyIntegration, ReentrancyGua
         }
 
         // Transfer back to strategy manager
-        IERC20(asset).transfer(strategyManager, actualAmount);
+        asset.safeTransfer(strategyManager, actualAmount);
 
         emit Withdrawn(asset, actualAmount);
         return actualAmount;
-    }
-
-    /**
-     * @notice Harvest yield from the protocol
-     * @param asset Asset to harvest
-     * @return yield Amount of yield harvested
-     */
-    function harvest(address asset) external override onlyStrategyManager nonReentrant returns (uint256) {
-        uint256 yield = _harvestFromProtocol(asset);
-
-        if (yield > 0) {
-            totalHarvested[asset] += yield;
-
-            // Transfer yield to strategy manager
-            IERC20(asset).transfer(strategyManager, yield);
-
-            emit Harvested(asset, yield);
-        }
-
-        return yield;
     }
 
     /**
@@ -159,39 +122,5 @@ abstract contract BaseStrategyIntegration is IStrategyIntegration, ReentrancyGua
      */
     function getBalance(address asset) external view override returns (uint256) {
         return _getProtocolBalance(asset);
-    }
-
-    /**
-     * @notice Get expected yield (if protocol provides this info)
-     * @param asset Asset to check yield for
-     * @return expectedYield Expected yield amount
-     */
-    function getExpectedYield(address asset) external view override returns (uint256) {
-        // Default implementation - protocols can override if they provide yield estimates
-        uint256 currentBalance = _getProtocolBalance(asset);
-        uint256 deposited = totalDeposited[asset];
-
-        if (currentBalance > deposited) {
-            return currentBalance - deposited;
-        }
-        return 0;
-    }
-
-    /**
-     * @notice Emergency withdrawal from protocol
-     * @return amount Amount withdrawn
-     */
-    function emergencyWithdraw() external override onlyOwner returns (uint256) {
-        // Would iterate through all assets in production
-        address asset = address(0); // Placeholder
-
-        uint256 amount = _emergencyWithdrawFromProtocol(asset);
-
-        if (amount > 0) {
-            IERC20(asset).transfer(strategyManager, amount);
-            emit EmergencyWithdrawn(asset, amount);
-        }
-
-        return amount;
     }
 }

@@ -25,4 +25,5 @@ interface IPoolManager {
         external
         returns (bool[] memory);
     function asset(uint256 id) external view returns (address);
+    function getTokenIdForAsset(address _asset) external view returns (uint256);
 }
