@@ -1,10 +1,11 @@
 import {
-  Character,
-  Plugin,
-  IAgentRuntime,
-  Memory,
-  State,
+  type Plugin,
+  type IAgentRuntime,
+  type Memory,
+  type State,
 } from '@elizaos/core';
+
+import type { Character } from '@elizaos/core';
 
 import { DataFetcher } from './core/data-fetcher.ts';
 import { RouteOptimizer } from './core/route-optimizer.ts';

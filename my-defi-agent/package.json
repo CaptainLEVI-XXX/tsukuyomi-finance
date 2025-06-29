@@ -1,0 +1,71 @@
+{
+  "name": "my-defi-agent",
+  "description": "Project starter for elizaOS",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/src/main.js",
+  "module": "dist/src/main.js",
+  "types": "dist/src/main.d.ts",
+  "keywords": [
+    "project",
+    "elizaos"
+  ],
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "import": {
+        "types": "./dist/src/main.d.ts",
+        "default": "./dist/src/main.js"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.55.0",
+    "@elizaos/cli": "latest",
+    "@elizaos/core": "latest",
+    "@elizaos/plugin-bootstrap": "latest",
+    "@elizaos/plugin-sql": "latest",
+    "@tanstack/react-query": "^5.29.0",
+    "axios": "^1.6.2",
+    "clsx": "^2.1.1",
+    "dotenv": "^16.3.1",
+    "ethers": "^6.8.1",
+    "lodash": "^4.17.21",
+    "node-cron": "^3.0.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss": "^4.1.10",
+    "winston": "^3.11.0",
+    "zod": "3.24.2"
+  },
+  "devDependencies": {
+    "@types/node-cron": "^3.0.11",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "prettier": "3.5.3",
+    "tsup": "8.5.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.1"
+  },
+  "scripts": {
+    "start": "ts-node --esm src/main.ts",
+    "build": "tsc",
+    "dev": "ts-node --esm --watch src/main.ts",
+    "analyze": "ts-node --esm src/main.ts --analyze",
+    "execute": "ts-node --esm src/main.ts --execute",
+    "monitor": "ts-node --esm src/main.ts --monitor"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "gitHead": "b165ad83e5f7a21bc1edbd83374ca087e3cd6b33"
+}

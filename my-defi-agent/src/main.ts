@@ -220,4 +220,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
 }
 
-export { DeFiAIAgent } from './agent.js';
+export { DeFiAIAgent } from './agent.ts';
