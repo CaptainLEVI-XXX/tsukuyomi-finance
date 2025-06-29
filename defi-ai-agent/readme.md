@@ -27,7 +27,7 @@ npm start -- monitor
 ✅ **Position Monitoring**: Continuous tracking with automated rebalancing alerts
 ✅ **ElizaOS Compatible**: Full plugin architecture for extensibility
 
-
+```bash
 # Conservative strategy for large amounts
 npm start -- execute --amount=500000 --risk=low
 
@@ -39,6 +39,7 @@ npm start -- analyze --amount=100000 --risk=medium
 
 # Start monitoring existing positions
 npm start -- monitor
+```
 
 
 ###Agent will:
