@@ -8,7 +8,6 @@ import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
 import {console} from "forge-std/console.sol";
 import {Test} from "forge-std/Test.sol";
 
-
 // ============ Mock CCIP Router ============
 
 contract MockCCIPRouter is Test {
@@ -267,8 +266,7 @@ contract CCIPTest is TestBase {
         vm.selectFork(mainnetFork);
         vm.startPrank(owner);
 
-        bytes4[3] memory selectors =
-            [baseStrategy.deposit.selector, baseStrategy.withdraw.selector, bytes4(0)];
+        bytes4[3] memory selectors = [baseStrategy.deposit.selector, baseStrategy.withdraw.selector, bytes4(0)];
 
         crossChainStrategyId =
             strategyManager.registerStrategy("Base Strategy", address(baseStrategy), BASE_CHAIN_SELECTOR, selectors);

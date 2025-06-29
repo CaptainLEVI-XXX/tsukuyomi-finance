@@ -134,17 +134,11 @@ contract TestBase is Test {
         vm.startPrank(owner);
 
         // Register AAVE strategy
-        bytes4[3] memory aaveSelectors = [
-            aaveIntegration.deposit.selector,
-            aaveIntegration.withdraw.selector,
-            aaveIntegration.getBalance.selector
-        ];
+        bytes4[3] memory aaveSelectors =
+            [aaveIntegration.deposit.selector, aaveIntegration.withdraw.selector, aaveIntegration.getBalance.selector];
 
         strategyManager.registerStrategy(
-            "AAVE V3 Strategy", 
-            address(aaveIntegration), 
-            MAINNET_CHAIN_SELECTOR, 
-            aaveSelectors
+            "AAVE V3 Strategy", address(aaveIntegration), MAINNET_CHAIN_SELECTOR, aaveSelectors
         );
 
         // Register Morpho strategy
@@ -155,10 +149,7 @@ contract TestBase is Test {
         ];
 
         strategyManager.registerStrategy(
-            "Morpho Blue Strategy", 
-            address(morphoIntegration), 
-            MAINNET_CHAIN_SELECTOR, 
-            morphoSelectors
+            "Morpho Blue Strategy", address(morphoIntegration), MAINNET_CHAIN_SELECTOR, morphoSelectors
         );
 
         vm.stopPrank();
@@ -167,7 +158,7 @@ contract TestBase is Test {
     function _configurePriceOracle() internal {
         // Add Chainlink price feeds for supported assets
         priceOracle.addPriceFeed(USDC, 0x8A753747a1fa494Ec906ce904320610a49a0A053, 3600);
-        priceOracle.addPriceFeed(USDT, 0x8A753747a1fa494Ec906ce904320610a49a0A053, 3600); 
+        priceOracle.addPriceFeed(USDT, 0x8A753747a1fa494Ec906ce904320610a49a0A053, 3600);
         priceOracle.addPriceFeed(DAI, 0x8A753747a1fa494Ec906ce904320610a49a0A053, 3600);
     }
 
@@ -219,7 +210,7 @@ contract TestBase is Test {
      */
     function setupUserWithDeposits(address user, uint256 amount) internal {
         fundUserWithTokens(user, amount);
-        
+
         vm.startPrank(user);
         USDC.safeApprove(address(poolManager), amount);
         USDT.safeApprove(address(poolManager), amount);
@@ -238,7 +229,7 @@ contract TestBase is Test {
         uint256 usdcValue = poolManager.getAvailableLiquidity(usdcTokenId);
         uint256 usdtValue = poolManager.getAvailableLiquidity(usdtTokenId);
         uint256 daiValue = poolManager.getAvailableLiquidity(daiTokenId);
-        
+
         // Convert all to USDC equivalent (simplified)
         return usdcValue + usdtValue + (daiValue / 1e12);
     }
@@ -246,12 +237,9 @@ contract TestBase is Test {
     /**
      * @notice Assert token balances for testing
      */
-    function assertTokenBalance(
-        address token, 
-        address account, 
-        uint256 expectedBalance,
-        string memory message
-    ) internal {
+    function assertTokenBalance(address token, address account, uint256 expectedBalance, string memory message)
+        internal
+    {
         uint256 actualBalance = getTokenBalance(token, account);
         assertEq(actualBalance, expectedBalance, message);
     }
@@ -259,10 +247,10 @@ contract TestBase is Test {
     /**
      * @notice Create investment parameters for testing
      */
-    function createInvestmentParams(uint256 tokenId, uint256 percentage) 
-        internal 
-        pure 
-        returns (uint256[] memory tokenIds, uint256[] memory percentages) 
+    function createInvestmentParams(uint256 tokenId, uint256 percentage)
+        internal
+        pure
+        returns (uint256[] memory tokenIds, uint256[] memory percentages)
     {
         tokenIds = new uint256[](1);
         tokenIds[0] = tokenId;

@@ -45,5 +45,4 @@ contract MockStrategyIntegration is IStrategyIntegration, Test {
     function getBalance(address asset) external view returns (uint256) {
         return balances[asset];
     }
-
 }

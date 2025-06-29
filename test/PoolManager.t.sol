@@ -14,7 +14,7 @@ contract PoolManagerTest is TestBase {
 
     function setUp() public override {
         super.setUp();
-        
+
         // Fund test users with tokens
         dealTokens(USDC, alice, 10_000e6);
         dealTokens(USDT, alice, 10_000e6);
@@ -198,10 +198,10 @@ contract PoolManagerTest is TestBase {
     function test_ZeroAmountDeposit() public {
         vm.startPrank(alice);
         USDC.safeApprove(address(poolManager), 1000e6);
-        
+
         vm.expectRevert();
         poolManager.deposit(usdcTokenId, 0, alice);
-        
+
         vm.stopPrank();
     }
 
@@ -221,10 +221,10 @@ contract PoolManagerTest is TestBase {
 
     function test_NonExistentAsset() public {
         vm.startPrank(alice);
-        
+
         vm.expectRevert();
         poolManager.deposit(999, 1000e6, alice); // Non-existent token ID
-        
+
         vm.stopPrank();
     }
 
@@ -246,10 +246,10 @@ contract PoolManagerTest is TestBase {
         // Add yield
         uint256 yield = 100e6;
         dealTokens(USDC, address(strategyManager), yield);
-        
+
         vm.prank(address(strategyManager));
         USDC.safeApprove(address(poolManager), yield);
-        
+
         vm.prank(address(strategyManager));
         poolManager.returnFromStrategy(usdcTokenId, 0, yield);
 
@@ -298,10 +298,10 @@ contract PoolManagerTest is TestBase {
         // Add yield
         uint256 yield = 100e6;
         dealTokens(USDC, address(strategyManager), yield);
-        
+
         vm.prank(address(strategyManager));
         USDC.safeApprove(address(poolManager), yield);
-        
+
         vm.prank(address(strategyManager));
         poolManager.returnFromStrategy(usdcTokenId, 0, yield);
 
