@@ -16,9 +16,8 @@ export interface PoolData {
     exposure: 'single' | 'multi';
     url?: string;
     strategyId?: number;
-  }
-  
-  export interface MarketConditions {
+}
+export interface MarketConditions {
     volatilityIndex: number;
     trendDirection: 'bullish' | 'bearish' | 'neutral';
     gasPrice: number;
@@ -26,18 +25,16 @@ export interface PoolData {
     topPerformingSectors: string[];
     marketFear: number;
     totalTVL: number;
-  }
-  
-  export interface RouteNode {
+}
+export interface RouteNode {
     chain: string;
     protocol: string;
     pool: PoolData;
     cost: number;
     risk: number;
     apy: number;
-  }
-  
-  export interface InvestmentRoute {
+}
+export interface InvestmentRoute {
     path: RouteNode[];
     totalCost: number;
     totalRisk: number;
@@ -45,15 +42,13 @@ export interface PoolData {
     estimatedAPY: number;
     bridgeSteps: number;
     estimatedTime: number;
-  }
-  
-  export interface TokenAllocation {
+}
+export interface TokenAllocation {
     tokenId: number;
     percentage: number;
     tokenSymbol: string;
-  }
-  
-  export interface PoolRecommendation {
+}
+export interface PoolRecommendation {
     pool: PoolData;
     strategyId: number;
     allocation: number;
@@ -63,9 +58,8 @@ export interface PoolData {
     expectedReturn: number;
     adjustedAPY: number;
     tokenAllocations: TokenAllocation[];
-  }
-  
-  export interface InvestmentStrategy {
+}
+export interface InvestmentStrategy {
     riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
     pools: PoolRecommendation[];
     totalExpectedAPY: number;
@@ -73,9 +67,8 @@ export interface PoolData {
     diversificationScore: number;
     estimatedAnnualReturn: number;
     gasAndBridgeCosts: number;
-  }
-  
-  export interface ExecutionResult {
+}
+export interface ExecutionResult {
     success: boolean;
     transactionHash?: string;
     depositId?: number;
@@ -88,21 +81,20 @@ export interface PoolData {
     poolProject?: string;
     allocation?: number;
     expectedAPY?: number;
-  }
-  
-  export interface AnalysisResults {
+}
+export interface AnalysisResults {
     low: InvestmentStrategy;
     medium: InvestmentStrategy;
     high: InvestmentStrategy;
     marketConditions: MarketConditions;
     recommendations: string;
     summary: string;
-  }
-  
-  export interface AutoExecutionConfig {
+}
+export interface AutoExecutionConfig {
     minInvestmentAmount: number;
     maxRiskScore: number;
     executionDelay: number;
     maxSlippage: number;
     autoExecute: boolean;
-  }
+}
+//# sourceMappingURL=index.d.ts.map
