@@ -1,8 +1,8 @@
 import { ethers } from 'ethers';
-import { PoolRecommendation, ExecutionResult } from '../types/index.js';
-import { CONTRACT_ABI, TOKEN_ADDRESSES } from '../utils/constant.js';
-import { logger } from '../utils/logger.js';
-import { Formatters } from '../utils/helper.js';
+import type { PoolRecommendation, ExecutionResult } from '../types/index.ts';
+import { CONTRACT_ABI, TOKEN_ADDRESSES } from '../utils/constant.ts';
+import { logger } from '../utils/logger.ts';
+import { Formatters } from '../utils/helper.ts';
 
 export class ContractExecutor {
   private provider: ethers.Provider;

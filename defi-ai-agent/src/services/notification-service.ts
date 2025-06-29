@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { logger } from '../utils/logger.js';
-import { Formatters } from '../utils/helper.js';
+import { logger } from '../utils/logger.ts';
+import { Formatters } from '../utils/helper.ts';
 
 interface RebalanceSignal {
   type: 'REBALANCE' | 'EXIT' | 'HARVEST';

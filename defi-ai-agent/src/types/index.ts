@@ -63,6 +63,11 @@ export interface PoolData {
     expectedReturn: number;
     adjustedAPY: number;
     tokenAllocations: TokenAllocation[];
+    aiInsights?: {
+        recommendation: string;
+        riskScore: number;
+        maxAllocation: number;
+      }; 
   }
   
   export interface InvestmentStrategy {
@@ -73,6 +78,8 @@ export interface PoolData {
     diversificationScore: number;
     estimatedAnnualReturn: number;
     gasAndBridgeCosts: number;
+    aiStrategy?: string; 
+    aiRecommendations?: string[];
   }
   
   export interface ExecutionResult {
@@ -106,3 +113,4 @@ export interface PoolData {
     maxSlippage: number;
     autoExecute: boolean;
   }
+  

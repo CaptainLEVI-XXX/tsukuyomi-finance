@@ -1,11 +1,10 @@
 import dotenv from 'dotenv';
-import { DeFiAIAgent } from './agent';
-import { logger } from './utils/logger.js';
-import { Formatters } from './utils/helper.js';
+import { DeFiAIAgent } from './agent.ts';
+import { logger } from './utils/logger.ts';
+import { Formatters } from './utils/helper.ts';
 
 // Load environment variables
 dotenv.config();
-
 async function main() {
   try {
     // ASCII Art Banner
@@ -221,4 +220,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
 }
 
-export { DeFiAIAgent } from './agent';
+export { DeFiAIAgent } from './agent.js';

@@ -13,6 +13,7 @@
     "monitor": "ts-node --esm src/main.ts --monitor"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.55.0",
     "@elizaos/core": "^1.0.0",
     "axios": "^1.6.2",
     "dotenv": "^16.3.1",

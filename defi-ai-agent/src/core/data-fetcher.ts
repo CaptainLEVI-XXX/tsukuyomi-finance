@@ -1,7 +1,7 @@
 import axios from 'axios';
-import { PoolData, MarketConditions } from '../types/index.js';
-import { logger } from '../utils/logger.js';
-import { STRATEGY_MAPPING } from '../utils/constant.js';
+import type { PoolData, MarketConditions } from '../types/index.ts';
+import { logger } from '../utils/logger.ts';
+import { STRATEGY_MAPPING } from '../utils/constant.ts';
 
 export class DataFetcher {
   private cache = new Map<string, { data: any; timestamp: number }>();
@@ -10,7 +10,7 @@ export class DataFetcher {
   async fetchPoolsForChain(chain: string): Promise<PoolData[]> {
     const cacheKey = `pools_${chain}`;
     const cached = this.getFromCache(cacheKey);
-    // if (cached) return cached
+    // if (cached) return cached;
 
     try {
       logger.info(`🔍 Fetching pools for ${chain}...`);
@@ -162,7 +162,7 @@ export class DataFetcher {
       poolType: this.categorizePoolType(pool),
       riskScore: this.calculateRiskScore(pool),
       underlyingTokens: pool.underlyingTokens || [],
-      protocolAge: pool.inception ? 
+      protocolAge: pool.inception ?
         Math.floor((Date.now() - new Date(pool.inception).getTime()) / (1000 * 60 * 60 * 24)) : 365,
       audits: pool.audits ? 'audited' : 'unknown',
       ilRisk: pool.ilRisk || false,
@@ -182,7 +182,7 @@ export class DataFetcher {
   private categorizePoolType(pool: any): PoolData['poolType'] {
     const symbol = pool.symbol?.toLowerCase() || '';
     const project = pool.project?.toLowerCase() || '';
-    
+
     if (project.includes('aave') || project.includes('compound')) {
       return 'lendingVariable';
     }
@@ -197,25 +197,25 @@ export class DataFetcher {
 
   private calculateRiskScore(pool: any): number {
     let risk = 50;
-    
+
     // TVL factor
     if (pool.tvlUsd > 1000000000) risk -= 15;
     else if (pool.tvlUsd > 100000000) risk -= 8;
     else if (pool.tvlUsd < 10000000) risk += 20;
-    
+
     // APY factor
     if (pool.apy > 50) risk += 25;
     else if (pool.apy > 20) risk += 15;
     else if (pool.apy < 5) risk -= 5;
-    
+
     // Project safety
     const safeProjects = ['aave', 'compound', 'curve', 'uniswap'];
     if (safeProjects.some(p => pool.project?.toLowerCase().includes(p))) {
       risk -= 15;
     }
-    
+
     if (pool.ilRisk) risk += 10;
-    
+
     return Math.max(5, Math.min(95, risk));
   }
 

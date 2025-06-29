@@ -1,5 +1,5 @@
-import { PoolData, MarketConditions } from '../types/index.js';
-import { logger } from '../utils/logger.js';
+import type { PoolData, MarketConditions } from '../types/index.ts';
+import { logger } from '../utils/logger.ts';
 
 export class RiskAnalyzer {
   private riskFactors = {
@@ -78,9 +78,9 @@ export class RiskAnalyzer {
   private calculateProtocolRisk(project: string, age: number): number {
     const bluechipProtocols = ['aave', 'compound', 'curve', 'uniswap', 'makerdao'];
     const establishedProtocols = ['balancer', 'yearn', 'convex', 'lido'];
-    
+
     let baseRisk = 50;
-    
+
     if (bluechipProtocols.some(p => project.toLowerCase().includes(p))) {
       baseRisk = 15;
     } else if (establishedProtocols.some(p => project.toLowerCase().includes(p))) {
@@ -134,7 +134,7 @@ export class RiskAnalyzer {
 
   private calculateILRisk(pool: PoolData): number {
     if (!pool.ilRisk) return 5;
-    
+
     if (pool.poolType === 'lpVolatile') return 70;
     if (pool.poolType === 'lpStable') return 25;
     return 40;
@@ -155,7 +155,7 @@ export class RiskAnalyzer {
   private calculateConcentrationRisk(allocations: number[]): number {
     const maxAllocation = Math.max(...allocations);
     const giniCoefficient = this.calculateGini(allocations);
-    
+
     return (maxAllocation * 0.7) + (giniCoefficient * 30);
   }
 
@@ -163,14 +163,14 @@ export class RiskAnalyzer {
     const sorted = [...allocations].sort((a, b) => a - b);
     const n = sorted.length;
     const mean = sorted.reduce((sum, val) => sum + val, 0) / n;
-    
+
     let numerator = 0;
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
         numerator += Math.abs(sorted[i] - sorted[j]);
       }
     }
-    
+
     return numerator / (2 * n * n * mean);
   }
 

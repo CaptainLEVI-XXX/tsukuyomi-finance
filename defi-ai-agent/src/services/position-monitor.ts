@@ -1,9 +1,9 @@
 import cron from 'node-cron';
-import { ContractExecutor } from './contract-executor.js';
-import { NotificationService } from './notification-service.js';
-import { logger } from '../utils/logger.js';
-import { Formatters } from '../utils/helper.js';
-import { TOKEN_ADDRESSES } from '../utils/constant.js';
+import { ContractExecutor } from './contract-executor.ts';
+import { NotificationService } from './notification-service.ts';
+import { logger } from '../utils/logger.ts';
+import { Formatters } from '../utils/helper.ts';
+import { TOKEN_ADDRESSES } from '../utils/constant.ts';
 
 interface Position {
   depositId: number;
