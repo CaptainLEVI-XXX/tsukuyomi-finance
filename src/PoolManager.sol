@@ -14,8 +14,7 @@ import {PoolManagerStorage} from "./storage/PoolManager.sol";
 
 /**
  * @title Pool Manager
- * @notice A comprehensive pool manager that handles multi-asset deposits with oracle pricing and strategy allocations
- * @dev Fully optimized implementation with proper ERC6909 integration
+ * @notice A pool manager that handles multi-asset deposits with oracle pricing and strategy allocations
  */
 contract PoolManager is Initializable, UUPSUpgradeable, Ownable, ERC6909, PoolManagerStorage {
     using CustomRevert for bytes4;

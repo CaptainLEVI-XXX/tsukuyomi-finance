@@ -2,267 +2,256 @@
 pragma solidity ^0.8.28;
 
 import {TestBase} from "./Base.t.sol";
-import {MockStrategyIntegration} from "./mocks/MockStrategyIntegration.sol";
 import {CrossChainStrategyManager} from "../src/CrossChainStrategyManager.sol";
 import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
+import {console} from "forge-std/console.sol";
 
+/**
+ * @title CrossChainStrategyManagerTest
+ * @notice Tests for CrossChainStrategyManager functionality
+ */
 contract CrossChainStrategyManagerTest is TestBase {
     using SafeTransferLib for address;
 
-    uint256 aaveStrategyId = 1;
-    uint256 morphoStrategyId = 2;
-
     function setUp() public override {
         super.setUp();
-
-        // Fund alice with tokens
-        _dealTokens(USDC, alice, 10_000e6);
-        _dealTokens(USDT, alice, 10_000e6);
-
-        // Alice deposits into pool
-        vm.startPrank(alice);
-        USDC.safeApprove(address(poolManager), 5_000e6);
-        USDT.safeApprove(address(poolManager), 5_000e6);
-
-        poolManager.deposit(usdcTokenId, 5_000e6, alice);
-        poolManager.deposit(usdtTokenId, 5_000e6, alice);
-        vm.stopPrank();
+        setupUserWithDeposits(alice, 5_000e6); // 5,000 USDC/USDT
     }
+
+    // ============ Strategy Registration Tests ============
 
     function test_StrategyRegistration() public {
-        // Check strategies are registered
-        CrossChainStrategyManager.StrategyInfo memory aaveStrategy = strategyManager.getStrategy(aaveStrategyId);
-        CrossChainStrategyManager.StrategyInfo memory morphoStrategy = strategyManager.getStrategy(morphoStrategyId);
+        CrossChainStrategyManager.StrategyInfo memory aaveStrategy = 
+            strategyManager.getStrategy(AAVE_STRATEGY_ID);
+        CrossChainStrategyManager.StrategyInfo memory morphoStrategy = 
+            strategyManager.getStrategy(MORPHO_STRATEGY_ID);
 
-        assertEq(aaveStrategy.name, "AAVE V3 Strategy", "AAVE strategy name incorrect");
-        assertEq(aaveStrategy.strategyAddress, address(aaveIntegration), "AAVE address incorrect");
-        assertEq(aaveStrategy.chainSelector, mainnetChainSelector, "Chain selector incorrect");
-        assertTrue(aaveStrategy.isActive, "AAVE strategy should be active");
+        // Verify AAVE strategy
+        assertEq(aaveStrategy.name, "AAVE V3 Strategy");
+        assertEq(aaveStrategy.strategyAddress, address(aaveIntegration));
+        assertEq(aaveStrategy.chainSelector, MAINNET_CHAIN_SELECTOR);
+        assertTrue(aaveStrategy.isActive);
 
-        assertEq(morphoStrategy.name, "Morpho Blue Strategy", "Morpho strategy name incorrect");
-        assertEq(morphoStrategy.strategyAddress, address(morphoIntegration), "Morpho address incorrect");
+        // Verify Morpho strategy
+        assertEq(morphoStrategy.name, "Morpho Blue Strategy");
+        assertEq(morphoStrategy.strategyAddress, address(morphoIntegration));
+        assertTrue(morphoStrategy.isActive);
     }
 
+    // ============ Local Investment Tests ============
+
     function test_LocalInvestmentFlow() public {
-        uint256 poolId = 1; // First pool
+        uint256 poolId = 1;
+        (uint256[] memory tokenIds, uint256[] memory percentages) = 
+            createInvestmentParams(usdcTokenId, 5000); // 50%
 
-        // Controller invests from pool to AAVE strategy
-        vm.startPrank(controller);
-
-        // Prepare investment parameters
-        uint256[] memory tokenIds = new uint256[](1);
-        tokenIds[0] = usdcTokenId;
-
-        uint256[] memory percentages = new uint256[](1);
-        percentages[0] = 5000; // 50% of available funds
-
-        // Check balances before
+        // Record initial state
         uint256 poolUsdcBefore = poolManager.getAvailableLiquidity(usdcTokenId);
         uint256 strategyUsdcBefore = aaveIntegration.getBalance(USDC);
 
-        // Invest in AAVE
+        // Execute investment
+        vm.prank(controller);
         uint256 depositId = strategyManager.investCrossChain(
             poolId,
-            aaveStrategyId,
+            AAVE_STRATEGY_ID,
             tokenIds,
             percentages,
             USDC,
-            address(0) // target asset
+            address(0)
         );
 
-        // Check balances after
+        // Verify investment results
         uint256 poolUsdcAfter = poolManager.getAvailableLiquidity(usdcTokenId);
         uint256 strategyUsdcAfter = aaveIntegration.getBalance(USDC);
-
-        // Assertions
         uint256 invested = poolUsdcBefore - poolUsdcAfter;
+
         assertEq(invested, 2_500e6, "Should invest 50% of 5000 USDC");
-        assertEq(strategyUsdcAfter - strategyUsdcBefore, invested, "Strategy balance incorrect");
+        assertEq(strategyUsdcAfter - strategyUsdcBefore, invested);
+        assertGt(depositId, 0, "Should return valid deposit ID");
 
-        // Check allocation tracking
-        CrossChainStrategyManager.AllocationInfo memory allocation = strategyManager.getAllocation(aaveStrategyId, USDC);
-        assertEq(allocation.principal, invested, "Principal tracking incorrect");
-        assertEq(allocation.currentValue, invested, "Current value incorrect");
-        assertTrue(allocation.isActive, "Allocation should be active");
-
-        vm.stopPrank();
+        // Verify allocation tracking
+        CrossChainStrategyManager.AllocationInfo memory allocation = 
+            strategyManager.getAllocation(AAVE_STRATEGY_ID, USDC);
+        
+        assertEq(allocation.principal, invested);
+        assertEq(allocation.currentValue, invested);
+        assertTrue(allocation.isActive);
     }
 
     function test_WithdrawFromStrategy() public {
         // Setup: Invest first
-        vm.startPrank(controller);
+        (uint256[] memory tokenIds, uint256[] memory percentages) = 
+            createInvestmentParams(usdcTokenId, 6000); // 60%
 
-        uint256[] memory tokenIds = new uint256[](1);
-        tokenIds[0] = usdcTokenId;
-        uint256[] memory percentages = new uint256[](1);
-        percentages[0] = 6000; // 60%
+        vm.prank(controller);
+        strategyManager.investCrossChain(1, AAVE_STRATEGY_ID, tokenIds, percentages, USDC, address(0));
 
-        strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC, address(0));
-
-        // Check initial state
+        // Record state before withdrawal
         uint256 poolBalanceBefore = poolManager.getAvailableLiquidity(usdcTokenId);
         CrossChainStrategyManager.AllocationInfo memory allocationBefore =
-            strategyManager.getAllocation(aaveStrategyId, USDC);
+            strategyManager.getAllocation(AAVE_STRATEGY_ID, USDC);
 
-        // Withdraw half from strategy back to pool
+        // Withdraw half from strategy
         uint256 withdrawAmount = allocationBefore.principal / 2;
-        strategyManager.withdrawFromStrategy(aaveStrategyId, USDC, withdrawAmount, 1);
+        
+        vm.prank(controller);
+        strategyManager.withdrawFromStrategy(AAVE_STRATEGY_ID, USDC, withdrawAmount, 1);
 
-        // Check final state
+        // Verify withdrawal results
         uint256 poolBalanceAfter = poolManager.getAvailableLiquidity(usdcTokenId);
         CrossChainStrategyManager.AllocationInfo memory allocationAfter =
-            strategyManager.getAllocation(aaveStrategyId, USDC);
+            strategyManager.getAllocation(AAVE_STRATEGY_ID, USDC);
 
-        // Pool should receive the withdrawn amount
-        assertEq(poolBalanceAfter - poolBalanceBefore, withdrawAmount, "Pool didn't receive withdrawn funds");
-
-        // Allocation should be reduced
-        assertLt(allocationAfter.principal, allocationBefore.principal, "Principal not reduced");
-        assertLt(allocationAfter.currentValue, allocationBefore.currentValue, "Current value not reduced");
-
-        vm.stopPrank();
+        assertEq(poolBalanceAfter - poolBalanceBefore, withdrawAmount, "Pool should receive withdrawn funds");
+        assertLt(allocationAfter.principal, allocationBefore.principal, "Principal should be reduced");
+        assertLt(allocationAfter.currentValue, allocationBefore.currentValue, "Current value should be reduced");
     }
+
+    // ============ Multi-Strategy Allocation Tests ============
 
     function test_MultiStrategyAllocation() public {
         vm.startPrank(controller);
 
-        // Invest in both AAVE and Morpho
-        uint256[] memory tokenIds = new uint256[](2);
-        tokenIds[0] = usdcTokenId;
-        tokenIds[1] = usdtTokenId;
+        // Invest USDC in AAVE (30%)
+        (uint256[] memory usdcTokens, uint256[] memory usdcPercentages) = 
+            createInvestmentParams(usdcTokenId, 3000);
+        
+        strategyManager.investCrossChain(1, AAVE_STRATEGY_ID, usdcTokens, usdcPercentages, USDC, address(0));
 
-        uint256[] memory percentages = new uint256[](2);
-        percentages[0] = 3000; // 30% of USDC
-        percentages[1] = 2000; // 20% of USDT
+        // Invest USDT in Morpho (20%) - will be swapped to USDC
+        (uint256[] memory usdtTokens, uint256[] memory usdtPercentages) = 
+            createInvestmentParams(usdtTokenId, 2000);
+        
+        strategyManager.investCrossChain(1, MORPHO_STRATEGY_ID, usdtTokens, usdtPercentages, USDC, address(0));
 
-        // Invest USDC in AAVE
-        uint256[] memory usdcOnly = new uint256[](1);
-        usdcOnly[0] = usdcTokenId;
-        uint256[] memory usdcPercentage = new uint256[](1);
-        usdcPercentage[0] = 3000;
+        vm.stopPrank();
 
-        strategyManager.investCrossChain(1, aaveStrategyId, usdcOnly, usdcPercentage, USDC, address(0));
-
-        // Invest USDT in Morpho (will be swapped to USDC)
-        uint256[] memory usdtOnly = new uint256[](1);
-        usdtOnly[0] = usdtTokenId;
-        uint256[] memory usdtPercentage = new uint256[](1);
-        usdtPercentage[0] = 2000;
-
-        strategyManager.investCrossChain(1, morphoStrategyId, usdtOnly, usdtPercentage, USDC, address(0));
-
-        // Check both strategies have allocations
+        // Verify both strategies have allocations
         CrossChainStrategyManager.AllocationInfo memory aaveAllocation =
-            strategyManager.getAllocation(aaveStrategyId, USDC);
+            strategyManager.getAllocation(AAVE_STRATEGY_ID, USDC);
         CrossChainStrategyManager.AllocationInfo memory morphoAllocation =
-            strategyManager.getAllocation(morphoStrategyId, USDC);
+            strategyManager.getAllocation(MORPHO_STRATEGY_ID, USDC);
 
         assertGt(aaveAllocation.principal, 0, "AAVE should have allocation");
         assertGt(morphoAllocation.principal, 0, "Morpho should have allocation");
 
-        // Check strategy totals
-        CrossChainStrategyManager.StrategyInfo memory aaveInfo = strategyManager.getStrategy(aaveStrategyId);
-        CrossChainStrategyManager.StrategyInfo memory morphoInfo = strategyManager.getStrategy(morphoStrategyId);
+        // Verify strategy total tracking
+        CrossChainStrategyManager.StrategyInfo memory aaveInfo = strategyManager.getStrategy(AAVE_STRATEGY_ID);
+        CrossChainStrategyManager.StrategyInfo memory morphoInfo = strategyManager.getStrategy(MORPHO_STRATEGY_ID);
 
-        assertEq(aaveInfo.totalAllocated, aaveAllocation.principal, "AAVE total allocated incorrect");
-        assertEq(morphoInfo.totalAllocated, morphoAllocation.principal, "Morpho total allocated incorrect");
-
-        vm.stopPrank();
+        assertEq(aaveInfo.totalAllocated, aaveAllocation.principal);
+        assertEq(morphoInfo.totalAllocated, morphoAllocation.principal);
     }
 
-    function test_RevertAllocationLimits() public {
-        vm.startPrank(owner);
-        // Set max allocation to 30%
+    // ============ Risk Management Tests ============
+
+    function test_AllocationLimits() public {
+        // Set maximum allocation limit to 30%
+        vm.prank(owner);
         strategyManager.updateMaxAllocation(3000);
-        vm.stopPrank();
 
         vm.startPrank(controller);
 
-        uint256[] memory tokenIds = new uint256[](1);
-        tokenIds[0] = usdcTokenId;
-        uint256[] memory percentages = new uint256[](1);
-        percentages[0] = 8000; // Try to allocate 80% (exceeds 30% limit per strategy)
-
-        // This would try to allocate 4000 USDC (80% of 5000), which exceeds the limit
-        // vm.expectRevert(CrossChainStrategyManager.InvalidAllocation.selector);
-        // strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC);
-
-        // 30% should work
-        percentages[0] = 3000;
-        uint256 depositId = strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC,address(0));
-        assertGt(depositId, 0, "Investment should succeed with 30%");
+        // 30% allocation should succeed
+        (uint256[] memory tokenIds, uint256[] memory percentages) = 
+            createInvestmentParams(usdcTokenId, 3000);
+        
+        uint256 depositId = strategyManager.investCrossChain(
+            1, AAVE_STRATEGY_ID, tokenIds, percentages, USDC, address(0)
+        );
+        assertGt(depositId, 0, "30% investment should succeed");
 
         vm.stopPrank();
     }
 
     function test_EmergencyWithdraw() public {
         // Setup: Invest funds first
-        vm.startPrank(controller);
+        (uint256[] memory tokenIds, uint256[] memory percentages) = 
+            createInvestmentParams(usdcTokenId, 5000);
 
-        uint256[] memory tokenIds = new uint256[](1);
-        tokenIds[0] = usdcTokenId;
-        uint256[] memory percentages = new uint256[](1);
-        percentages[0] = 5000;
+        vm.prank(controller);
+        strategyManager.investCrossChain(1, AAVE_STRATEGY_ID, tokenIds, percentages, USDC, address(0));
 
-        strategyManager.investCrossChain(1, aaveStrategyId, tokenIds, percentages, USDC,address(0));
-        vm.stopPrank();
+        // Execute emergency withdrawal
+        vm.prank(owner);
+        strategyManager.emergencyWithdraw(AAVE_STRATEGY_ID, USDC);
 
-        // Owner performs emergency withdrawal
-        vm.startPrank(owner);
-
-        uint256 strategyBalanceBefore = aaveIntegration.getBalance(USDC);
-
-        // Note: This is a simplified test - actual implementation would need to handle the withdrawal
-        strategyManager.emergencyWithdraw(aaveStrategyId, USDC);
-
-        // In a real implementation, funds would be withdrawn from strategy
-        // For now, just check the event was emitted
-        vm.stopPrank();
+        // Note: In production, this would actually withdraw funds from the strategy
+        // For testing, we just verify the function executes without reverting
     }
 
-    function test_crossChainDeposit() public{
-        uint256 poolId = 1; // First pool
+    // ============ Integration Tests ============
 
-        // Controller invests from pool to AAVE strategy
-        vm.startPrank(controller);
+    function test_CrossChainDeposit() public {
+        uint256 poolId = 1;
+        (uint256[] memory tokenIds, uint256[] memory percentages) = 
+            createInvestmentParams(usdcTokenId, 5000); // 50%
 
-        // Prepare investment parameters
-        uint256[] memory tokenIds = new uint256[](1);
-        tokenIds[0] = usdcTokenId;
-
-        uint256[] memory percentages = new uint256[](1);
-        percentages[0] = 5000; // 50% of available funds
-
-        // Check balances before
+        // Record initial balances
         uint256 poolUsdcBefore = poolManager.getAvailableLiquidity(usdcTokenId);
         uint256 strategyUsdcBefore = aaveIntegration.getBalance(USDC);
 
-        // Invest in AAVE
+        // Execute cross-chain deposit
+        vm.prank(controller);
         uint256 depositId = strategyManager.investCrossChain(
             poolId,
-            aaveStrategyId,
+            AAVE_STRATEGY_ID,
             tokenIds,
             percentages,
             USDC,
-            address(0) // target asset
+            address(0)
         );
 
-        // Check balances after
+        // Verify results
         uint256 poolUsdcAfter = poolManager.getAvailableLiquidity(usdcTokenId);
         uint256 strategyUsdcAfter = aaveIntegration.getBalance(USDC);
-
-        // Assertions
         uint256 invested = poolUsdcBefore - poolUsdcAfter;
+
         assertEq(invested, 2_500e6, "Should invest 50% of 5000 USDC");
-        assertEq(strategyUsdcAfter - strategyUsdcBefore, invested, "Strategy balance incorrect");
+        assertEq(strategyUsdcAfter - strategyUsdcBefore, invested);
+        assertGt(depositId, 0, "Should return valid deposit ID");
 
-        // Check allocation tracking
-        CrossChainStrategyManager.AllocationInfo memory allocation = strategyManager.getAllocation(aaveStrategyId, USDC);
-        assertEq(allocation.principal, invested, "Principal tracking incorrect");
-        assertEq(allocation.currentValue, invested, "Current value incorrect");
-        assertTrue(allocation.isActive, "Allocation should be active");
+        // Verify allocation tracking
+        CrossChainStrategyManager.AllocationInfo memory allocation = 
+            strategyManager.getAllocation(AAVE_STRATEGY_ID, USDC);
+        
+        assertEq(allocation.principal, invested);
+        assertEq(allocation.currentValue, invested);
+        assertTrue(allocation.isActive);
+    }
 
-        vm.stopPrank();
+    // ============ View Function Tests ============
 
+    function test_GetStrategyInfo() public {
+        CrossChainStrategyManager.StrategyInfo memory strategy = 
+            strategyManager.getStrategy(AAVE_STRATEGY_ID);
+        
+        assertEq(strategy.name, "AAVE V3 Strategy");
+        assertEq(strategy.strategyAddress, address(aaveIntegration));
+        assertEq(strategy.chainSelector, MAINNET_CHAIN_SELECTOR);
+        assertTrue(strategy.isActive);
+        assertEq(strategy.totalAllocated, 0); // No investments yet
+    }
+
+    function test_GetAllocationInfo() public {
+        // Before investment - should be empty
+        CrossChainStrategyManager.AllocationInfo memory allocation = 
+            strategyManager.getAllocation(AAVE_STRATEGY_ID, USDC);
+        
+        assertEq(allocation.principal, 0);
+        assertEq(allocation.currentValue, 0);
+        assertFalse(allocation.isActive);
+
+        // After investment - should have data
+        (uint256[] memory tokenIds, uint256[] memory percentages) = 
+            createInvestmentParams(usdcTokenId, 4000);
+
+        vm.prank(controller);
+        strategyManager.investCrossChain(1, AAVE_STRATEGY_ID, tokenIds, percentages, USDC, address(0));
+
+        allocation = strategyManager.getAllocation(AAVE_STRATEGY_ID, USDC);
+        assertGt(allocation.principal, 0);
+        assertGt(allocation.currentValue, 0);
+        assertTrue(allocation.isActive);
     }
 }
