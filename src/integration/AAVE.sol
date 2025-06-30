@@ -9,7 +9,7 @@ import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
  * @title AaveV3Integration
  * @notice Example integration for Aave V3
  */
-abstract contract AaveV3Integration is BaseStrategyIntegration {
+contract AaveV3Integration is BaseStrategyIntegration {
     using SafeTransferLib for address;
 
     IPoolAave public immutable aavePool;

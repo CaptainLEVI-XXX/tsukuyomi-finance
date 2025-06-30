@@ -203,25 +203,16 @@ contract CrossChainStrategyManager is
     function investCrossChain(
         uint256 poolId,
         uint256 strategyId,
-        uint256[] calldata tokenIds,
-        uint256[] calldata percentages,
-        address targetAsset,
-        address targetAssetOnDestinationChain
+        uint256[] calldata tokenIds,     //[USDT,DAI,USDC]
+        uint256[] calldata percentages, // [30,40,50]
+        address targetAsset,             //USDC on Avalanche
+        address targetAssetOnDestinationChain //USDC on Ethereum
     ) external onlyController validStrategy(strategyId) returns (uint256 depositId) {
         StrategyInfo memory strategy = strategies[strategyId];
 
         // Request funds from pool
         (uint256 totalAmount, address[] memory assets, uint256[] memory amounts) =
             _requestFundsFromPool(poolId, tokenIds, percentages);
-
-        // Check allocation limits
-        // uint256 currentAllocation = allocations[strategyId][targetAsset].currentValue;
-
-        // uint256 poolTotalValue = _getPoolTotalValue(poolId);
-
-        // if ((currentAllocation + totalAmount) * BPS_DIVISOR > poolTotalValue * maxAllocationPerStrategy) {
-        //     revert AllocationLimitExceeded();
-        // }
 
         // If strategy is on current chain, invest directly
         if (strategy.chainSelector == currentChainSelector) {

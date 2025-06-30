@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import {Test} from "forge-std/Test.sol";
 import {SafeTransferLib} from "@solady/utils/SafeTransferLib.sol";
 import {IStrategyIntegration} from "../../src/interfaces/IStrategyIntegration.sol";
 
 // Mock Strategy Integration for testing
-contract MockStrategyIntegration is IStrategyIntegration, Test {
+contract MockStrategyIntegration is IStrategyIntegration {
     using SafeTransferLib for address;
 
     address public immutable strategyManager;
